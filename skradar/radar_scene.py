@@ -12,6 +12,7 @@ import numpy as np
 import scipy.signal
 import scipy.spatial
 import matplotlib.pyplot as plt
+
 plt.ion()
 
 
@@ -27,17 +28,21 @@ class Thing:
         pos:
             Vector describing the current position in Cartesian
             world coordinates.
-        rotation:  
+        rotation:
             Rotation matrix describing the orientation of the object.
-        vel:  
+        vel:
             Current velocity vector.
-        omega:  
+        omega:
             Current angular velocity vector.
     """
 
-    def __init__(self, name: str, pos: np.ndarray,
-                 rotation: np.ndarray = np.eye(3),
-                 vel: np.ndarray = np.zeros((3, 1))):
+    def __init__(
+        self,
+        name: str,
+        pos: np.ndarray,
+        rotation: np.ndarray = np.eye(3),
+        vel: np.ndarray = np.zeros((3, 1)),
+    ):
         """
         Create a thing.
 
@@ -54,36 +59,39 @@ class Thing:
         vel : np.ndarray, shape (3, 1)
             Velocity vector in world coordinates. The default is np.zeros(3,1).
         """
-        if not(pos.shape == (3, 1)):
+        if not (pos.shape == (3, 1)):
             warnings.warn(
-                f'Warning: Expected pos with shape (3,1) but got {pos.shape}.' +
-                ' Trying to reshape')
+                f"Warning: Expected pos with shape (3,1) but got {pos.shape}."
+                + " Trying to reshape"
+            )
             pos = pos.copy().reshape((3, 1))
         self.pos = pos
-        if not(vel.shape == (3, 1)):
+        if not (vel.shape == (3, 1)):
             warnings.warn(
-                f'Warning: Expected vel with shape (3,1) but got {vel.shape}.' +
-                ' Trying to reshape')
+                f"Warning: Expected vel with shape (3,1) but got {vel.shape}."
+                + " Trying to reshape"
+            )
             vel = vel.copy().reshape((3, 1))
         self.vel = vel
         self.rotation = rotation
         self.loc2world = pt.transform_from(
-            R=self.rotation, p=pos.ravel())  # homogeneous coordinates
+            R=self.rotation, p=pos.ravel()
+        )  # homogeneous coordinates
         self.world2loc = pt.invert_transform(self.loc2world)
         self.name = name
         self.scene = None
 
     def __str__(self):  # convenient for visualization
-        if not(self.name is None) and len(self.name) > 0:
+        if not (self.name is None) and len(self.name) > 0:
             return self.name
         else:
             return self.__repr__()
 
-    def predict_pose(self, delta_t: float) -> tuple[np.ndarray, np.ndarray,
-                                                    np.ndarray]:
+    def predict_pose(self, delta_t: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         pos = self.pos + self.vel * delta_t
         loc2world = pt.transform_from(
-            R=self.rotation, p=pos.ravel())  # homogeneous coordinates
+            R=self.rotation, p=pos.ravel()
+        )  # homogeneous coordinates
         world2loc = pt.invert_transform(loc2world)
         return pos, loc2world, world2loc
 
@@ -142,11 +150,20 @@ class Radar(Thing, ABC):
             Local 3-d Cartesian coordinate(s) of the M_rx RX antenna(s) in meters.
     """
 
-    def __init__(self, tx_pos: np.ndarray, rx_pos: np.ndarray, N_s: int, T_s: float,
-                 tx_ant_gains: np.ndarray = None, rx_ant_gains: np.ndarray = None,
-                 tx_powers: np.ndarray = None, rx_gains: np.ndarray = None,
-                 Z0: float = 50, T_ref: float = 293,
-                 **kwargs):
+    def __init__(
+        self,
+        tx_pos: np.ndarray,
+        rx_pos: np.ndarray,
+        N_s: int,
+        T_s: float,
+        tx_ant_gains: np.ndarray = None,
+        rx_ant_gains: np.ndarray = None,
+        tx_powers: np.ndarray = None,
+        rx_gains: np.ndarray = None,
+        Z0: float = 50,
+        T_ref: float = 293,
+        **kwargs,
+    ):
         """
         Create a radar object.
 
@@ -182,19 +199,15 @@ class Radar(Thing, ABC):
 
         """
         if tx_pos.ndim != 2:
-            raise ValueError(
-                f'Expected two-dimensional tx_pos but got {tx_pos.ndim}.')
+            raise ValueError(f"Expected two-dimensional tx_pos but got {tx_pos.ndim}.")
         elif tx_pos.shape[0] != 3:
-            raise ValueError(
-                f'Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.')
+            raise ValueError(f"Expected tx_pos with 3 rows but got {tx_pos.shape[0]}.")
         else:
             self.tx_pos = tx_pos
         if rx_pos.ndim != 2:
-            raise ValueError(
-                f'Expected two-dimensional rx_pos but got {rx_pos.ndim}.')
+            raise ValueError(f"Expected two-dimensional rx_pos but got {rx_pos.ndim}.")
         elif rx_pos.shape[0] != 3:
-            raise ValueError(
-                f'Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.')
+            raise ValueError(f"Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.")
         else:
             self.rx_pos = rx_pos
         if tx_ant_gains is None:
@@ -217,7 +230,7 @@ class Radar(Thing, ABC):
         self.T_ref = T_ref
         self.targets = None
         self.rp = None  # range profile
-        
+
         # slow time vec. (unif. chirp sequence)
         self.t_s = np.arange(N_s) * T_s
 
@@ -284,8 +297,9 @@ class Radar(Thing, ABC):
                 rx_dist[rx_cntr] = np.sqrt(np.dot(rx_to_targ, rx_to_targ))
             for tx_cntr in range(self.M_tx):
                 for rx_cntr in range(self.M_rx):  # all tx/rx combinations
-                    dists[tx_cntr, rx_cntr,
-                          targ_cntr] = tx_dist[tx_cntr] + rx_dist[rx_cntr]
+                    dists[tx_cntr, rx_cntr, targ_cntr] = (
+                        tx_dist[tx_cntr] + rx_dist[rx_cntr]
+                    )
         return dists, tx_dist, rx_dist
 
     @abstractmethod
@@ -301,24 +315,28 @@ class Radar(Thing, ABC):
         pass
 
     def merge_mimo(self):
-        raise NotImplementedError('Function not implemented yet')
+        raise NotImplementedError("Function not implemented yet")
 
     def extract_mimo(self):
-        raise NotImplementedError('Function not implemented yet')
+        raise NotImplementedError("Function not implemented yet")
 
-    def angle_proc_bp(self, ranges_bp: np.ndarray, angles_bp: np.ndarray,
-                      process_noisy: bool = True):
+    def angle_proc_bp(
+        self, ranges_bp: np.ndarray, angles_bp: np.ndarray, process_noisy: bool = True
+    ):
         # ranges_bp contains distances to image pixels (not round-trip)
         if self.rp is None:
-            raise TypeError(
-                'rp is None. It has to be calculated first')
+            raise TypeError("rp is None. It has to be calculated first")
         elif self.M_rx < 2 and self.M_tx < 2:
-            warnings.warn("Warning: Angle processing doesn't make sense for " +
-                          "only one antenna. Doing nothing.")
+            warnings.warn(
+                "Warning: Angle processing doesn't make sense for "
+                + "only one antenna. Doing nothing."
+            )
         elif 2 * (np.max(ranges_bp)) > np.max(self.ranges):
             # Definitely too large, even for a monostatic configuration
-            raise ValueError('Image size too large: Range profile does not ' +
-                             'cover the largest distance TX->pixel->RX.')
+            raise ValueError(
+                "Image size too large: Range profile does not "
+                + "cover the largest distance TX->pixel->RX."
+            )
         else:
             self.ranges_bp = ranges_bp
             num_ranges = self.ranges_bp.shape[0]
@@ -332,26 +350,50 @@ class Radar(Thing, ABC):
 
             # all combinations of TX-, RX-, and pixel-indices
             rx_idcs_mat, tx_idcs_mat, px_idcs_mat = np.meshgrid(
-                np.arange(self.M_rx), np.arange(self.M_tx), np.arange(num_ranges * num_angles))
+                np.arange(self.M_rx),
+                np.arange(self.M_tx),
+                np.arange(num_ranges * num_angles),
+            )
 
             tx_idcs = tx_idcs_mat.ravel()
             rx_idcs = rx_idcs_mat.ravel()
             px_idcs = px_idcs_mat.ravel()
 
-            image_vec = backprojection(x_mat, y_mat, z_mat, (self.tx_pos, self.rx_pos),
-                           (tx_idcs, rx_idcs), px_idcs, self.rp, self.ranges, self.kw, self.N_f)
+            image_vec = backprojection(
+                x_mat,
+                y_mat,
+                z_mat,
+                (self.tx_pos, self.rx_pos),
+                (tx_idcs, rx_idcs),
+                px_idcs,
+                self.rp,
+                self.ranges,
+                self.kw,
+                self.N_f,
+            )
 
             self.ra_bp = image_vec.reshape((num_angles, num_ranges))
             scale_to_amp = 1 / (self.M_rx * self.M_tx)
             self.ra_bp = scale_to_amp * self.ra_bp
             if process_noisy:
-                image_vec = backprojection(x_mat, y_mat, z_mat, (self.tx_pos, self.rx_pos),
-                           (tx_idcs, rx_idcs), px_idcs, self.rp_noisy, self.ranges, self.kw, self.N_f)
+                image_vec = backprojection(
+                    x_mat,
+                    y_mat,
+                    z_mat,
+                    (self.tx_pos, self.rx_pos),
+                    (tx_idcs, rx_idcs),
+                    px_idcs,
+                    self.rp_noisy,
+                    self.ranges,
+                    self.kw,
+                    self.N_f,
+                )
                 self.ra_bp_noisy = image_vec.reshape((num_angles, num_ranges))
                 self.ra_bp_noisy = scale_to_amp * self.ra_bp_noisy
 
-    def angle_proc_RX_DFT(self, zp_fact: float = 1, win_rx: str = 'boxcar',
-                          process_noisy: bool = True):
+    def angle_proc_RX_DFT(
+        self, zp_fact: float = 1, win_rx: str = "boxcar", process_noisy: bool = True
+    ):
         """
         Calculate angle-FFT along the RX antennas for all range-profile samples.
 
@@ -370,33 +412,40 @@ class Radar(Thing, ABC):
 
         """
         if self.rp is None:
-            raise TypeError(
-                'rp is None. It has to be calculated first')
+            raise TypeError("rp is None. It has to be calculated first")
         elif self.M_rx < 2:
-            warnings.warn("Warning: Angle processing doesn't make sense for " +
-                          "only one antenna. Doing nothing.")
+            warnings.warn(
+                "Warning: Angle processing doesn't make sense for "
+                + "only one antenna. Doing nothing."
+            )
         else:
             # TODO: Check if antennas are on a line
             # TODO: Check if spacing is uniform
             win_rx = scipy.signal.windows.get_window(win_rx, self.M_rx)
             win = win_rx[:, np.newaxis, np.newaxis]
-            z = 2**nextpow2(zp_fact * self.M_rx)
+            z = 2 ** nextpow2(zp_fact * self.M_rx)
             win_coh_gain = np.sum(win_rx) / self.M_rx
             scale_to_amp = 1 / (self.M_rx * win_coh_gain)
             self.ra = scale_to_amp * np.fft.fft(self.rp * win, n=z, axis=-3)
             self.ra = np.fft.fftshift(self.ra, axes=-3)
             if process_noisy:
-                self.ra_noisy = scale_to_amp * np.fft.fft(self.rp_noisy * win, n=z, axis=-3)
+                self.ra_noisy = scale_to_amp * np.fft.fft(
+                    self.rp_noisy * win, n=z, axis=-3
+                )
                 self.ra_noisy = np.fft.fftshift(self.ra_noisy, axes=-3)
             u_vec = 2 * np.fft.fftshift(np.fft.fftfreq(z))
             self.angles = np.arcsin(u_vec)
 
     def angle_proc_DFT(self):
         self.extract_mimo()
-        raise NotImplementedError('Function not implemented yet')
+        raise NotImplementedError("Function not implemented yet")
 
-    def doppler_processing(self, zp_fact: float = 1, win_doppler: str = "boxcar",
-                           process_noisy: bool=True):
+    def doppler_processing(
+        self,
+        zp_fact: float = 1,
+        win_doppler: str = "boxcar",
+        process_noisy: bool = True,
+    ):
         """
         Calculate range-Doppler map by applying an FFT along the slow time.
 
@@ -411,18 +460,18 @@ class Radar(Thing, ABC):
 
         """
         if self.rp is None:
-            raise TypeError(
-                'rp is None. It has to be calculated first')
+            raise TypeError("rp is None. It has to be calculated first")
         else:
             if self.N_s > 1:
                 win = scipy.signal.windows.get_window(win_doppler, self.N_s)
                 win = win[np.newaxis, np.newaxis, :, np.newaxis]
-                z = 2**nextpow2(zp_fact * self.N_s)
+                z = 2 ** nextpow2(zp_fact * self.N_s)
                 self.rd = np.fft.fft(self.rp, n=z, axis=2)
                 if process_noisy:
                     if self.rp_noisy is None:
                         raise TypeError(
-                            'rp_noisy is None. It has to be calculated first')
+                            "rp_noisy is None. It has to be calculated first"
+                        )
                     self.rd_noisy = np.fft.fft(self.rp_noisy, n=z, axis=2)
             else:
                 self.rd = self.rp
@@ -447,15 +496,29 @@ class FMCWRadar(Radar):
             TODO.
     """
 
-    def __init__(self, B: float, fc: float, N_f: int, N_s: int, T_f: float,
-                 T_s: float, win_range: str = 'hann', win_doppler: str = "boxcar",
-                 if_real: bool = True, **kwargs):
+    def __init__(
+        self,
+        B: float,
+        fc: float,
+        N_f: int,
+        N_s: int,
+        T_f: float,
+        T_s: float,
+        L_freqs_vec: np.array,
+        L_dB_vec: np.array,
+        win_range: str = "hann",
+        win_doppler: str = "boxcar",
+        if_real: bool = True,
+        **kwargs,
+    ):
         self.B = B
         self.fc = fc
         self.N_f = N_f
         self.N_s = N_s
         self.T_f = T_f
         self.T_s = T_s
+        self.L_freqs_vec = L_freqs_vec
+        self.L_dB_vec = L_dB_vec
         self.if_real = if_real
         self.s_if = None
         self.s_if_bursts = None
@@ -466,8 +529,8 @@ class FMCWRadar(Radar):
     def sim_chirps(self):
         """
         Simulate IF signals (slow-time and fast-time samples) for the FMCW radar.
-        
-        The simulated signal results from the sum of the contributions from all 
+
+        The simulated signal results from the sum of the contributions from all
         TX, RX and target combinations.
 
         Returns
@@ -479,45 +542,180 @@ class FMCWRadar(Radar):
             self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
             self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f))
         else:
-            self.s_if = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex)
-            self.s_if_noisy = np.zeros((self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex)
+            self.s_if = np.zeros(
+                (self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex
+            )
+            self.s_if_noisy = np.zeros(
+                (self.M_tx, self.M_rx, self.N_s, self.N_f), dtype=complex
+            )
+
+        # pahse noise preparations
+        N_s_pn_ss = self.N_f // 2  # TODO to be checked
+        T_s_pn_ss = self.T_f * 2  # due to doubled fs and Ns by stacking
+
+        # interpolate phase noise to IF bin frequencies
+        f_fft_SSB_vec = np.arange(N_s_pn_ss) / (
+            T_s_pn_ss * N_s_pn_ss
+        )  # frequencies without ZP
+        f_fft_IF_tmp = f_fft_SSB_vec.copy()
+        # set first FFT frequency point to 1 Hz
+        # to avoid problems with the interpolation in semilogx-form
+        f_fft_IF_tmp[0] = 1
+
+        L_vec = 10 ** (
+            self.L_dB_vec / 10
+        )  # PN psd specification (linear, rel. to carrier)
+        # scale to bin width
+        # factor 2 depends on type of PN spec (SSB vs. DSB) and conversion of L to S
+        # smaini uses factor 1/2 when coming from L
+        O_vec_bin = np.sqrt(
+            (L_vec / 2) * (1 / (N_s_pn_ss * T_s_pn_ss))
+        )  # phase noise spectrum wtihout phase spectrum added yet
+        # interpolated array
+        S_f_vec_bin_dB = np.interp(
+            np.log10(f_fft_IF_tmp), np.log10(self.L_freqs_vec), 20 * np.log10(O_vec_bin)
+        )
+        S_f_vec_bin = 10 ** (S_f_vec_bin_dB / 20)
+
+        S_f = S_f_vec_bin.copy()
+        S_f[0] = 0  # dc
+        S_f = np.hstack((S_f, 0, S_f[:0:-1]))  # now we cover 0...2*fs_SSB
+        fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
+        N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
+
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             for tx_cntr in range(self.M_tx):
+                # phase noise for transmitter
+                PN_phi_seed = np.pi * (1 - 2 * np.random.rand(int(N_PN / 2) - 1))
+                # phi = np.hstack((0, PN_phi_seed, 0, -PN_phi_seed[::-1]))
+                # vekPN_LO = np.real(np.fft.ifft(N_PN * S_f * np.exp(1j * phi)))
                 for rx_cntr in range(self.M_rx):
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
+                        phi_shift = PN_phi_seed - 2 * np.pi * f_fft_SSB_vec[
+                            1 : int(self.N_f)
+                        ] * (dist / c0)
+                        phi_shift = np.hstack((0, phi_shift, 0, -phi_shift[::-1]))
+                        vekPN_RX = np.fft.ifft(N_PN * S_f * np.exp(1j * phi_shift))
                         # radar equation step-by-step
                         p_tx_eirp = self.tx_powers[tx_cntr] * self.tx_ant_gains[tx_cntr]
-                        s_targ = p_tx_eirp/(4*np.pi*tx_dist[tx_cntr]**2)  # power density at target
-                        p_refl = s_targ*self.targets[targ_cntr].rcs  # power reflected from target
-                        s_rx = p_refl/(4*np.pi*rx_dist[rx_cntr]**2)  # power density at receiver
-                        lambd = c0/self.fc
-                        a_eff = self.rx_ant_gains[rx_cntr]*lambd**2/(4*np.pi)  # effective RX antenna area
-                        p_rx = s_rx * a_eff * self.rx_gains[rx_cntr]  # power of IF signal
-                        A_pk = np.sqrt(2)*np.sqrt(p_rx * self.Z0)  # power to amplitude
-                        s_if_tmp = A_pk*sim_FMCW_if(
-                            dist, self.B, self.fc, self.N_f, self.T_s, cplx=not(self.if_real))
+                        s_targ = p_tx_eirp / (
+                            4 * np.pi * tx_dist[tx_cntr] ** 2
+                        )  # power density at target
+                        p_refl = (
+                            s_targ * self.targets[targ_cntr].rcs
+                        )  # power reflected from target
+                        s_rx = p_refl / (
+                            4 * np.pi * rx_dist[rx_cntr] ** 2
+                        )  # power density at receiver
+                        lambd = c0 / self.fc
+                        a_eff = (
+                            self.rx_ant_gains[rx_cntr] * lambd**2 / (4 * np.pi)
+                        )  # effective RX antenna area
+                        p_rx = (
+                            s_rx * a_eff * self.rx_gains[rx_cntr]
+                        )  # power of IF signal
+                        A_pk = np.sqrt(2) * np.sqrt(
+                            p_rx * self.Z0
+                        )  # power to amplitude
+                        s_if_tmp = (
+                            A_pk
+                            * sim_FMCW_if(
+                                dist,
+                                self.B,
+                                self.fc,
+                                self.N_f,
+                                self.T_s,
+                                cplx=not (self.if_real),
+                            )
+                            * np.exp(2j * np.pi * vekPN_RX)
+                        )
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
         self.generate_AWGN()
 
+    def genereate_pn(
+        L_freqs_vec: np.array, L_dB_vec: np.array, N_s: int, T_s: float, tau
+    ):
+
+        N_s_pn_ss = N_s // 2  # TODO to be checked
+        T_s_pn_ss = T_s * 2  # due to doubled fs and Ns by stacking
+
+        # interpolate phase noise to IF bin frequencies
+        f_fft_SSB_vec = np.arange(N_s_pn_ss) / (
+            T_s_pn_ss * N_s_pn_ss
+        )  # frequencies without ZP
+        f_fft_IF_tmp = f_fft_SSB_vec.copy()
+        # set first FFT frequency point to 1 Hz
+        # to avoid problems with the interpolation in semilogx-form
+        f_fft_IF_tmp[0] = 1
+
+        L_vec = 10 ** (L_dB_vec / 10)  # PN psd specification (linear, rel. to carrier)
+        # scale to bin width
+        # factor 2 depends on type of PN spec (SSB vs. DSB) and conversion of L to S
+        # smaini uses factor 1/2 when coming from L
+        O_vec_bin = np.sqrt(
+            (L_vec / 2) * (1 / (N_s_pn_ss * T_s_pn_ss))
+        )  # phase noise spectrum wtihout phase spectrum added yet
+        # interpolated array
+        S_f_vec_bin_dB = np.interp(
+            np.log10(f_fft_IF_tmp), np.log10(L_freqs_vec), 20 * np.log10(O_vec_bin)
+        )
+        S_f_vec_bin = 10 ** (S_f_vec_bin_dB / 20)
+
+        S_f = S_f_vec_bin.copy()
+        S_f[0] = 0  # dc
+        S_f = np.hstack((S_f, 0, S_f[:0:-1]))  # now we cover 0...2*fs_SSB
+        fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
+        N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
+
+        PN_phi_seed = np.pi * (1 - 2 * np.random.rand(tau.shape[0], int(N_PN / 2) - 1))
+
+        # add zero tau for transmitter phase noise
+        tau = np.concatenate((np.zeros(tau.shape[0:-1])[:, :, None], tau), axis=2)
+
+        phi_shift = (
+            PN_phi_seed[:, None, None, :]
+            - 2
+            * np.pi
+            * f_fft_SSB_vec[None, None, None, 1 : int(N_s_pn_ss)]
+            * tau[:, :, :, None]
+        )
+        phi_shift = np.concatenate(
+            (
+                np.zeros(np.append(phi_shift.shape[0:-1], 1)),
+                phi_shift,
+                np.zeros(np.append(phi_shift.shape[0:-1], 1)),
+                -phi_shift[::-1],
+            ),
+            axis=3,
+        )
+        vekPN_shift_freq_domain = N_PN * S_f * np.exp(1j * phi_shift)
+        vekPN_shift = np.real(np.fft.ifft(vekPN_shift_freq_domain, axis=3))
+
+        return vekPN_shift
+
     def generate_AWGN(self):
-        fs = 1/self.T_f
-        noise_std = np.sqrt(4*self.Z0*Boltzmann*self.T_ref*fs/2)
+        fs = 1 / self.T_f
+        noise_std = np.sqrt(4 * self.Z0 * Boltzmann * self.T_ref * fs / 2)
         if self.if_real:
             self.noise = self.rng.normal(0, noise_std, (self.M_rx, self.N_s, self.N_f))
         else:
-            self.noise = (self.rng.normal(0, noise_std/np.sqrt(2), (self.M_rx, self.N_s, self.N_f))+
-                         1j*self.rng.normal(0, noise_std/np.sqrt(2), (self.M_rx, self.N_s, self.N_f)))
+            self.noise = self.rng.normal(
+                0, noise_std / np.sqrt(2), (self.M_rx, self.N_s, self.N_f)
+            ) + 1j * self.rng.normal(
+                0, noise_std / np.sqrt(2), (self.M_rx, self.N_s, self.N_f)
+            )
         # multiple TXs and/or multiple targets do not add noise
         # noise will be only added for each RX, slow-time sample and fast-time sample
         tx_cntr = 0
         for chirp_cntr in range(self.N_s):
             for rx_cntr in range(self.M_rx):
-                self.s_if_noisy[tx_cntr, rx_cntr,
-                                chirp_cntr, :] = (self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] + 
-                                                    self.noise[rx_cntr, chirp_cntr, :])
-                        
+                self.s_if_noisy[tx_cntr, rx_cntr, chirp_cntr, :] = (
+                    self.s_if[tx_cntr, rx_cntr, chirp_cntr, :]
+                    + self.noise[rx_cntr, chirp_cntr, :]
+                )
+
     def add_burst(self):
         """
         Generate a new burst of IF signals and append to the array of bursts.
@@ -532,9 +730,10 @@ class FMCWRadar(Radar):
             self.s_if_bursts = self.s_if[:, :, np.newaxis, :, :]
         else:
             np.concatenate(
-                (self.s_if_bursts, self.s_if[:, :, np.newaxis, :, :]), axis=2)
+                (self.s_if_bursts, self.s_if[:, :, np.newaxis, :, :]), axis=2
+            )
 
-    def range_compression(self, zp_fact: float, process_noisy: bool=True):
+    def range_compression(self, zp_fact: float, process_noisy: bool = True):
         """
         Perform range compression and amplitude scaling on the previously simulated or measured intermediate frequency data.
 
@@ -543,7 +742,7 @@ class FMCWRadar(Radar):
 
         Parameters
         ----------
-        zp_fact : float            
+        zp_fact : float
             Zero-padding factor. The IF signal is zero-padded to
             2**nextpow2(zp_fact*N) with N being the number of samples in s_if.
         process_noisy : bool
@@ -561,8 +760,7 @@ class FMCWRadar(Radar):
 
         """
         if self.s_if is None:
-            raise TypeError(
-                's_if is None. It has to be simulated or loaded first')
+            raise TypeError("s_if is None. It has to be simulated or loaded first")
         else:
             flatten_phase = True
             win_coh_gain = np.sum(self.win_range) / self.N_f
@@ -571,16 +769,22 @@ class FMCWRadar(Radar):
             else:
                 scale_to_amp = 1 / (self.N_f * win_coh_gain)
             self.rp, self.ranges = range_compress_FMCW(
-                self.s_if, self.win_range, self.B, zp_fact,
-                self.scene.c, flatten_phase)
+                self.s_if, self.win_range, self.B, zp_fact, self.scene.c, flatten_phase
+            )
             self.rp = scale_to_amp * self.rp
             if process_noisy:
                 if self.s_if_noisy is None:
                     raise TypeError(
-                        's_if is None. It has to be simulated or loaded first')
+                        "s_if is None. It has to be simulated or loaded first"
+                    )
                 self.rp_noisy, self.ranges = range_compress_FMCW(
-                    self.s_if_noisy, self.win_range, self.B, zp_fact,
-                    self.scene.c, flatten_phase)
+                    self.s_if_noisy,
+                    self.win_range,
+                    self.B,
+                    zp_fact,
+                    self.scene.c,
+                    flatten_phase,
+                )
                 self.rp_noisy = scale_to_amp * self.rp_noisy
 
 
@@ -658,61 +862,86 @@ if __name__ == "__main__":
     T_chirp = (N_f - 1) * 1 / f_sf
 
     reference_pos = np.array([[0], [0], [0.3]])
-    TxPosn = np.array([[-139.425, -20.25, 16.0],
-                       [-129.675, -20.25, 16.0],
-                       [-119.925, -20.25, 16.0],
-                       [-110.175, -20.25, 16.0],
-                       [-14.625, -20.25, 16.0],
-                       [-4.875, -20.25, 16.0],
-                       [4.875, -20.25, 16.0],
-                       [14.625, -20.25, 16.0],
-                       [110.175, -20.25, 16.0],
-                       [119.925, -20.25, 16.0],
-                       [129.675, -20.25, 16.0],
-                       [139.425, -20.25, 16.0]]).T * 1e-3
+    TxPosn = (
+        np.array(
+            [
+                [-139.425, -20.25, 16.0],
+                [-129.675, -20.25, 16.0],
+                [-119.925, -20.25, 16.0],
+                [-110.175, -20.25, 16.0],
+                [-14.625, -20.25, 16.0],
+                [-4.875, -20.25, 16.0],
+                [4.875, -20.25, 16.0],
+                [14.625, -20.25, 16.0],
+                [110.175, -20.25, 16.0],
+                [119.925, -20.25, 16.0],
+                [129.675, -20.25, 16.0],
+                [139.425, -20.25, 16.0],
+            ]
+        ).T
+        * 1e-3
+    )
 
-    RxPosn = np.array([[-62.4, 20.25, 16.0],
-                       [-54.6, 20.25, 16.0],
-                       [-46.8, 20.25, 16.0],
-                       [-39.0, 20.25, 16.0],
-                       [-31.2, 20.25, 16.0],
-                       [-23.4, 20.25, 16.0],
-                       [-15.6, 20.25, 16.0],
-                       [-7.8, 20.25, 16.0],
-                       [0.0, 20.25, 16.0],
-                       [7.8, 20.25, 16.0],
-                       [15.6, 20.25, 16.0],
-                       [23.4, 20.25, 16.0],
-                       [31.2, 20.25, 16.0],
-                       [39.0, 20.25, 16.0],
-                       [46.8, 20.25, 16.0],
-                       [54.6, 20.25, 16.0]]).T * 1e-3
+    RxPosn = (
+        np.array(
+            [
+                [-62.4, 20.25, 16.0],
+                [-54.6, 20.25, 16.0],
+                [-46.8, 20.25, 16.0],
+                [-39.0, 20.25, 16.0],
+                [-31.2, 20.25, 16.0],
+                [-23.4, 20.25, 16.0],
+                [-15.6, 20.25, 16.0],
+                [-7.8, 20.25, 16.0],
+                [0.0, 20.25, 16.0],
+                [7.8, 20.25, 16.0],
+                [15.6, 20.25, 16.0],
+                [23.4, 20.25, 16.0],
+                [31.2, 20.25, 16.0],
+                [39.0, 20.25, 16.0],
+                [46.8, 20.25, 16.0],
+                [54.6, 20.25, 16.0],
+            ]
+        ).T
+        * 1e-3
+    )
 
-    radar = FMCWRadar(B=B, fc=fc, N_f=N_f, T_f=1 / f_sf, T_s=1 / T_chirp,
-                      N_s=N_s, tx_pos=TxPosn, rx_pos=RxPosn,
-                      pos=reference_pos, name='First radar')
-    target1 = Target(rcs=1, pos=np.array(
-        [[0.2], [0.5], [0.5]]), name='Small static target')
-    target2 = Target(rcs=10, pos=np.array(
-        [[0], [0], [0.7]]), name='Big static target')
+    radar = FMCWRadar(
+        B=B,
+        fc=fc,
+        N_f=N_f,
+        T_f=1 / f_sf,
+        T_s=1 / T_chirp,
+        N_s=N_s,
+        tx_pos=TxPosn,
+        rx_pos=RxPosn,
+        pos=reference_pos,
+        name="First radar",
+    )
+    target1 = Target(
+        rcs=1, pos=np.array([[0.2], [0.5], [0.5]]), name="Small static target"
+    )
+    target2 = Target(rcs=10, pos=np.array([[0], [0], [0.7]]), name="Big static target")
     scene = Scene([radar], [target1, target2])
 
     # Visualize scene
     fig = plt.figure(1)
     plt.clf()
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(111, projection="3d")
     scene.visualize("world", ax)
 
     # Print some geometric information
     tf_matrix = scene.tm.get_transform(radar, target1)
-    print(f'Transformation matrix between radar and target1: {tf_matrix}\n')
+    print(f"Transformation matrix between radar and target1: {tf_matrix}\n")
     p_in_world = vector_to_point(np.array([0, 0, 0.5]))
     p_in_radar = transform(radar.world2loc, p_in_world)
     p_in_target1 = transform(target1.world2loc, p_in_world)
 
-    print(f'The point {p_in_world} in the world coordinate can be described as'
-          f' {p_in_radar} in the coordinate system of the radar and as'
-          f' {p_in_target1} in the coordinate system of target1.')
+    print(
+        f"The point {p_in_world} in the world coordinate can be described as"
+        f" {p_in_radar} in the coordinate system of the radar and as"
+        f" {p_in_target1} in the coordinate system of target1."
+    )
 
     radar.sim_chirps()
     radar.range_compression(zp_fact=4)

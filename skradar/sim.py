@@ -4,9 +4,16 @@ from scipy.constants import speed_of_light as c0
 from scipy.constants import Boltzmann as kb
 
 
-def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
-                v: float = 0, c: float = c0,
-                cplx: bool = False) -> np.ndarray:
+def sim_FMCW_if(
+    r: float,
+    B: float,
+    fc: float,
+    N: float,
+    Ts: float,
+    v: float = 0,
+    c: float = c0,
+    cplx: bool = False,
+) -> np.ndarray:
     """
     This function simulates the intermediate frequency (IF) signal of a
     single-chirp of an FMCW radar.
@@ -27,7 +34,7 @@ def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
     N : float
         Number of samples.
     Ts : float
-        Sample interval (inverse of sampling rate) in seconds.        
+        Sample interval (inverse of sampling rate) in seconds.
     v : float, optional
         Target velocity in meters/second. For monostatic radars this is twice
         the target velocity. The default is 0.
@@ -54,7 +61,9 @@ def sim_FMCW_if(r: float, B: float, fc: float, N: float, Ts: float,
     return s_if
 
 
-def AWGN(N: int, fs: float, T: float = 290, seed: int = None, cplx: bool = False) -> np.ndarray:
+def AWGN(
+    N: int, fs: float, T: float = 290, seed: int = None, cplx: bool = False
+) -> np.ndarray:
     """Generates samples of either real- or complex-valued white Gaussian noise.
 
     The noise power density is calculated from kb*t using Boltzmann's constant kb. The equivalent
@@ -81,15 +90,23 @@ def AWGN(N: int, fs: float, T: float = 290, seed: int = None, cplx: bool = False
     rng = default_rng(seed)
     p_noise = kb * T * fs / 2  # noise power in ADC bandwidth
     if cplx:
-        noise = np.sqrt(p_noise) * (rng.standard_normal(N) +
-                                    1j * rng.standard_normal(N))
+        noise = np.sqrt(p_noise) * (
+            rng.standard_normal(N) + 1j * rng.standard_normal(N)
+        )
     else:
         noise = np.sqrt(p_noise) * rng.standard_normal(N)
     return noise
 
 
-def radar_eq(r_tx: float, r_rx: float, rcs: float, lambd: float,
-             P_tx: float = 1e-3, G_tx: float = 1, G_rx: float = 1) -> float:
+def radar_eq(
+    r_tx: float,
+    r_rx: float,
+    rcs: float,
+    lambd: float,
+    P_tx: float = 1e-3,
+    G_tx: float = 1,
+    G_rx: float = 1,
+) -> float:
     """Calculates the power at a receiver according to the radar equation.
 
     Parameters

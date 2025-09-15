@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import skradar
 
 plt.ioff()
-# np.random.seed(1)
+np.random.seed(1)
 B = 1e9
 fc = 76.5e9
 N_f = 4 * 512  # number of fast-time samples
@@ -14,14 +14,14 @@ fs_f = 4 * 1e6  # fast-time sampling rate
 Ts_s = (N_f - 1) / fs_f  # slow-time sampling interval
 N_s = 1  # number of slow-time samples
 
-tx_pos = np.array([[0, 0], [0, 0], [0, 0]])
-rx_pos = np.array([[0], [0], [0]])
-tx_lo = np.array([0, 1])
-rx_lo = np.array([0])
+tx_pos = np.array([[0], [0], [0]])
+rx_pos = np.array([[0, 0], [0, 0], [0, 0]])
+tx_lo = np.array([0])
+rx_lo = np.array([0, 1])
 
 radar_pos = np.array([[0], [0], [0]])
-L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8])
-L_dB_vec = np.array([-65, -65, -85, -115, -115])
+L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) / 2
+L_dB_vec = np.array([-65, -65, -85, -115, -115])  # * 1.5
 radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     B=B,
     fc=fc,
@@ -35,39 +35,19 @@ radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     rx_pos=rx_pos,
     tx_lo=tx_lo,
     rx_lo=rx_lo,
-    tx_ant_gains=np.array([15, 15]),
-    rx_ant_gains=np.array([10]),
+    tx_ant_gains=np.array([15]),
+    rx_ant_gains=np.array([10, 10]),
     pos=radar_pos,
     name="First radar",
     if_real=True,
 )
 
 target_pos = np.array([[0], [11.3], [0]])
+target_pos1 = np.array([[0], [40], [0]])
 target = skradar.Target(rcs=10, pos=target_pos, name="Static target, 10 sqm")
+target1 = skradar.Target(rcs=10, pos=target_pos1, name="Static target, 10 sqm")
 
-scene = skradar.Scene([radar], [target])
-
-fig = plt.figure(1, figsize=(12, 8))
-plt.clf()
-ax = fig.add_subplot(111, projection="3d")
-ax.set_xlim((-7.5, 7.5))
-ax.set_ylim((0, 15))
-ax.set_zlim((-7.5, 7.5))
-scene.visualize("world", ax, coord_len=2)
-ax.set_xlabel("x (m)")
-ax.set_ylabel("y (m)")
-ax.set_zlabel("z (m)")
-
-fig = plt.figure(2, figsize=(12, 8))
-plt.clf()
-ax = fig.add_subplot(111, projection="3d")
-ax.set_xlim((-7.5, 7.5))
-ax.set_ylim((-15, 0))
-ax.set_zlim((-7.5, 7.5))
-scene.visualize(target, ax, coord_len=2)
-ax.set_xlabel("x (m)")
-ax.set_ylabel("y (m)")
-ax.set_zlabel("z (m)")
+scene = skradar.Scene([radar], [target, target1])
 
 radar.sim_chirps()
 
@@ -76,46 +56,28 @@ radar.range_compression(zp_fact=32)
 target_dists = radar.ranges / 2  # halve values to account for round-trip ranges
 target_dists_plot = target_dists[: len(radar.ranges) // 2]
 # sqrt(2) to convert to RMS power from sinusoidal peak value
-rp_plot = 1 / (np.sqrt(2)) * radar.rp[0, 0, 0, : len(radar.ranges) // 2]
-rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[0, 0, 0, : len(radar.ranges) // 2]
-peak_idx = np.argmax(np.abs(rp_plot))
+rp_plot = 1 / (np.sqrt(2)) * radar.rp[0, :, 0, : len(radar.ranges) // 2]
+rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[0, :, 0, : len(radar.ranges) // 2]
+peak_idx = np.argmax(np.abs(rp_plot[0]))
 
-plt.figure(2, figsize=(12, 8))
+plt.figure(1, figsize=(12, 8))
 plt.clf()
-plt.subplot(2, 1, 1)
-plt.plot(target_dists_plot, 20 * np.log10(np.abs(rp_plot)), label="Noiseless")
-plt.plot(target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy)), label="Noisy")
+plt.subplot(1, 1, 1)
+plt.plot(
+    target_dists_plot, 20 * np.log10(np.abs(rp_plot[0])), label="Coherent receiver"
+)
+plt.plot(
+    target_dists_plot, 20 * np.log10(np.abs(rp_plot[1])), label="Incoherent receiver"
+)
+# plt.plot(target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[0])), label="Noisy")
+# plt.plot(
+#     target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[1])), label="Noisy incoherent"
+# )
 plt.plot(
     [target_dists_plot[peak_idx], target_dists_plot[peak_idx]],
     [
-        20 * np.log10(np.abs(rp_plot[peak_idx])) - 40,
-        20 * np.log10(np.abs(rp_plot[peak_idx])) + 10,
-    ],
-    "--r",
-)
-plt.legend()
-plt.grid(True)
-plt.xlabel("Range (m)")
-plt.ylabel("RMS power (dBV)")
-plt.subplot(2, 1, 2)
-plt.plot(
-    target_dists_plot[peak_idx - 10 : peak_idx + 10],
-    20 * np.log10(np.abs(rp_plot[peak_idx - 10 : peak_idx + 10])),
-    "-x",
-    label="Noiseless",
-)
-plt.plot(
-    target_dists_plot[peak_idx - 10 : peak_idx + 10],
-    20 * np.log10(np.abs(rp_plot_noisy[peak_idx - 10 : peak_idx + 10])),
-    "-o",
-    label="Noisy",
-)
-plt.plot(target_dists_plot[peak_idx], 20 * np.log10(np.abs(rp_plot[peak_idx])), ".r")
-plt.plot(
-    [target_dists_plot[peak_idx], target_dists_plot[peak_idx]],
-    [
-        20 * np.log10(np.abs(rp_plot[peak_idx])) - 1,
-        20 * np.log10(np.abs(rp_plot[peak_idx])) + 1,
+        20 * np.log10(np.abs(rp_plot[0, peak_idx])) - 40,
+        20 * np.log10(np.abs(rp_plot[0, peak_idx])) + 10,
     ],
     "--r",
 )
@@ -124,4 +86,3 @@ plt.grid(True)
 plt.xlabel("Range (m)")
 plt.ylabel("RMS power (dBV)")
 plt.show()
-print(f"Estimated target distance: {radar.ranges[peak_idx]/2:.3f} m")

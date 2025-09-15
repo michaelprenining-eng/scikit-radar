@@ -213,13 +213,13 @@ class Radar(Thing, ABC):
         else:
             self.rx_pos = rx_pos
         if tx_lo is None:
-            self.tx_lo = np.zeros(self.M_tx)
+            self.tx_lo = np.zeros(self.M_tx, dtype=int)
         else:
-            self.tx_lo = tx_lo
+            self.tx_lo = tx_lo.astype(int)
         if rx_lo is None:
-            self.rx_lo = np.zeros(self.M_rx)
+            self.rx_lo = np.zeros(self.M_rx, dtype=int)
         else:
-            self.rx_lo = rx_lo
+            self.rx_lo = rx_lo.astype(int)
         if tx_ant_gains is None:
             self.tx_ant_gains = np.ones(self.M_tx)  # isotropic radiator
         else:
@@ -240,6 +240,8 @@ class Radar(Thing, ABC):
         self.T_ref = T_ref
         self.targets = None
         self.rp = None  # range profile
+        self.lo = np.append(self.tx_lo, self.rx_lo)
+        self.lo = np.unique(self.lo)
 
         # slow time vec. (unif. chirp sequence)
         self.t_s = np.arange(N_s) * T_s
@@ -593,30 +595,43 @@ class FMCWRadar(Radar):
         fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
         N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
 
+        # test plot time axis
+        t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
+
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             plt.figure("Phase_course_test_plot")
+            # phase noise for transmitters
+            PN_phi_seed = np.pi * (
+                1 - 2 * np.random.rand(self.lo.shape[0], int(N_PN / 2) - 1)
+            )
             for tx_cntr in range(self.M_tx):
-                # phase noise for transmitter
-                PN_phi_seed = np.pi * (1 - 2 * np.random.rand(int(N_PN / 2) - 1))
-                phi = np.hstack((0, PN_phi_seed, 0, -PN_phi_seed[::-1]))
+                tx_lo_idx = np.squeeze(np.where(self.lo == self.tx_lo[tx_cntr]))
+                phi = np.hstack(
+                    (
+                        [0],
+                        PN_phi_seed[tx_lo_idx],
+                        [0],
+                        -PN_phi_seed[tx_lo_idx, ::-1],
+                    )
+                )
                 vekPN_LO = np.real(np.fft.ifft(N_PN * S_f * np.exp(1j * phi)))
                 # test plot
-                t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
-                plt.plot(t * 1e6, vekPN_LO)
+                plt.plot(t * 1e6, vekPN_LO, label=f"TX - LO {tx_lo_idx}")
                 plt.xlabel("Time in us")
                 for rx_cntr in range(self.M_rx):
+                    rx_lo_idx = np.squeeze(np.where(self.lo == self.rx_lo[rx_cntr]))
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
-                        phi_shift = PN_phi_seed - 2 * np.pi * f_fft_SSB_vec[
+                        phi_shift = PN_phi_seed[rx_lo_idx] - 2 * np.pi * f_fft_SSB_vec[
                             1 : int(self.N_f)
                         ] * (dist / c0)
-                        phi_shift = np.hstack((0, phi_shift, 0, -phi_shift[::-1]))
+                        phi_shift = np.hstack(([0], phi_shift, [0], -phi_shift[::-1]))
                         vekPN_RX = np.real(
                             np.fft.ifft(N_PN * S_f * np.exp(1j * phi_shift))
                         )
                         # test plot
-                        plt.plot(t * 1e6, vekPN_RX)
+                        plt.plot(t * 1e6, vekPN_RX, label=f"RX - LO {rx_lo_idx}")
                         # radar equation step-by-step
                         p_tx_eirp = self.tx_powers[tx_cntr] * self.tx_ant_gains[tx_cntr]
                         s_targ = p_tx_eirp / (
@@ -650,10 +665,17 @@ class FMCWRadar(Radar):
                             )
                             * np.exp(2 * np.pi * (vekPN_RX - vekPN_LO)).real
                         )
+                        # test plot
+                        plt.plot(
+                            t * 1e6,
+                            vekPN_RX - vekPN_LO,
+                            label=f"TX {tx_cntr} - RX {rx_cntr}",
+                        )
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
             # test plot
             plt.xlim([0, 50])
             plt.grid()
+            plt.legend()
             plt.show()
         self.generate_AWGN()
 

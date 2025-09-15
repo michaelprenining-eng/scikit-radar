@@ -158,6 +158,8 @@ class Radar(Thing, ABC):
         T_s: float,
         tx_ant_gains: np.ndarray = None,
         rx_ant_gains: np.ndarray = None,
+        tx_lo: np.ndarray = None,
+        rx_lo: np.ndarray = None,
         tx_powers: np.ndarray = None,
         rx_gains: np.ndarray = None,
         Z0: float = 50,
@@ -210,6 +212,14 @@ class Radar(Thing, ABC):
             raise ValueError(f"Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.")
         else:
             self.rx_pos = rx_pos
+        if tx_lo is None:
+            self.tx_lo = np.zeros(self.M_tx)
+        else:
+            self.tx_lo = tx_lo
+        if rx_lo is None:
+            self.rx_lo = np.zeros(self.M_rx)
+        else:
+            self.rx_lo = rx_lo
         if tx_ant_gains is None:
             self.tx_ant_gains = np.ones(self.M_tx)  # isotropic radiator
         else:
@@ -585,11 +595,16 @@ class FMCWRadar(Radar):
 
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
+            plt.figure("Phase_course_test_plot")
             for tx_cntr in range(self.M_tx):
                 # phase noise for transmitter
                 PN_phi_seed = np.pi * (1 - 2 * np.random.rand(int(N_PN / 2) - 1))
-                # phi = np.hstack((0, PN_phi_seed, 0, -PN_phi_seed[::-1]))
-                # vekPN_LO = np.real(np.fft.ifft(N_PN * S_f * np.exp(1j * phi)))
+                phi = np.hstack((0, PN_phi_seed, 0, -PN_phi_seed[::-1]))
+                vekPN_LO = np.real(np.fft.ifft(N_PN * S_f * np.exp(1j * phi)))
+                # test plot
+                t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
+                plt.plot(t * 1e6, vekPN_LO)
+                plt.xlabel("Time in us")
                 for rx_cntr in range(self.M_rx):
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
@@ -597,7 +612,11 @@ class FMCWRadar(Radar):
                             1 : int(self.N_f)
                         ] * (dist / c0)
                         phi_shift = np.hstack((0, phi_shift, 0, -phi_shift[::-1]))
-                        vekPN_RX = np.fft.ifft(N_PN * S_f * np.exp(1j * phi_shift))
+                        vekPN_RX = np.real(
+                            np.fft.ifft(N_PN * S_f * np.exp(1j * phi_shift))
+                        )
+                        # test plot
+                        plt.plot(t * 1e6, vekPN_RX)
                         # radar equation step-by-step
                         p_tx_eirp = self.tx_powers[tx_cntr] * self.tx_ant_gains[tx_cntr]
                         s_targ = p_tx_eirp / (
@@ -629,9 +648,13 @@ class FMCWRadar(Radar):
                                 self.T_s,
                                 cplx=not (self.if_real),
                             )
-                            * np.exp(2j * np.pi * vekPN_RX)
+                            * np.exp(2 * np.pi * (vekPN_RX - vekPN_LO)).real
                         )
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
+            # test plot
+            plt.xlim([0, 50])
+            plt.grid()
+            plt.show()
         self.generate_AWGN()
 
     def genereate_pn(

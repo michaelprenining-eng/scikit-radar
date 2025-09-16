@@ -50,7 +50,7 @@ target1 = skradar.Target(rcs=10, pos=target_pos1, name="Static target, 10 sqm")
 scene = skradar.Scene([radar], [target1])
 
 radar.sim_chirps()
-
+radar.merge_mimo()
 zp_fact_range = 4
 radar.range_compression(zp_fact=zp_fact_range)
 radar.doppler_processing(zp_fact=4, win_doppler="hann")

@@ -328,7 +328,9 @@ class Radar(Thing, ABC):
         pass
 
     def merge_mimo(self):
-        raise NotImplementedError("Function not implemented yet")
+        self.s_if = np.sum(self.s_if, axis=0, keepdims=True)
+        self.s_if_noisy = np.sum(self.s_if_noisy, axis=0, keepdims=True)
+        # raise NotImplementedError("Function not implemented yet")
 
     def extract_mimo(self):
         raise NotImplementedError("Function not implemented yet")

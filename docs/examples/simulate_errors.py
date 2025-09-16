@@ -6,11 +6,11 @@ import skradar
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
-from utility_functions import get_info, generate_pn, plot_three_RD_maps
+from utility_functions import get_info, plot_three_RD_maps
 from scipy.signal import ShortTimeFFT
 from scipy.signal.windows import hann
 
-# import spkit as sp
+import spkit as sp
 
 plt.ioff()
 import sys
@@ -174,23 +174,12 @@ plt.ylabel("$S_{{\\varphi}}(f) \\mathrm{{(dBrad^2/Hz)}}$")
 # plt.legend(("Specification (shifted by 3 dB)", "Interpolated values"))
 plt.show()
 
-vekPN, vekPN_shift_freq_domain = generate_pn(
-    L_freqs_vec, L_dB_vec, radar.N_f, radar.T_f, tofs
-)
-vekPN_tx = vekPN[:, :, 0, :]  # transmitter phase noise (no time shift)
-vekPN_shift = vekPN[:, :, 1:, :]  # phase noise at receiver
-vekPN_shift_rx = np.sum(
-    vekPN_shift, axis=2
-)  # sum over targets (needs to be done after if generation!!)
-
-
 # sum all errors
 phase_course_rdm = (
     phase_course_f0_offset[None, None, None:]
     + phase_course_f0_offset_trigger
     + phase_course_delta_B[None, None, None:]
     + start_phase[:, :, :, None]
-    # + vekPN_shift_rx[:, :, None, :]  # should be added per (tx-)target??
 )
 
 # if-signal with non-coherent effects
@@ -202,11 +191,6 @@ else:
     radar.s_if_noisy = radar.s_if * np.exp(1j * phase_course_rdm)
 
 radar_no_correction.s_if_noisy = radar.s_if_noisy
-
-# phase noise "correction" could be placed before
-radar.s_if_noisy = radar.s_if_noisy * np.exp(
-    -1j * vekPN_tx[:, :, None, :]
-)  # phase noise correlation??
 
 ###########################################################################################################
 # error correction part
@@ -382,10 +366,10 @@ plot_three_RD_maps(
     right_cbar_label="Power in dB",
     figure_name="RD_maps_all",
 )
-plt.savefig(
-    "measurement_data/figures/" + "RD_maps_all" + ".pdf",
-    bbox_inches="tight",
-)
+# plt.savefig(
+#     "measurement_data/figures/" + "RD_maps_all" + ".pdf",
+#     bbox_inches="tight",
+# )
 
 # plot range spectrum
 rp_simulated_plot = 20 * np.log(rp_simulated)[: N_f * zp_fact_range // 2]
@@ -420,10 +404,10 @@ rp_ax.set_xlabel("Range in m")
 rp_ax.set_ylabel("Power in dB")
 rp_ax.grid(True)
 rp_ax.legend()
-plt.savefig(
-    "measurement_data/figures/" + "range_spectrum" + ".pdf",
-    bbox_inches="tight",
-)
+# plt.savefig(
+#     "measurement_data/figures/" + "range_spectrum" + ".pdf",
+#     bbox_inches="tight",
+# )
 
 # plot exemplary stft result for one chirp
 fig_stft, ax_stft = plt.subplots(
@@ -469,12 +453,13 @@ if_ax.legend()
 
 if debugPlot:
     if savefig:
-        figure_name = "test"
-        plt.savefig(
-            "files/python_plots/" + figure_name + ".pdf",
-            papertype="a4",
-            bbox_inches="tight",
-        )
+        pass
+        # figure_name = "test"
+        # plt.savefig(
+        #     "files/python_plots/" + figure_name + ".pdf",
+        #     papertype="a4",
+        #     bbox_inches="tight",
+        # )
     else:
         plt.show()
 

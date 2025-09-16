@@ -213,13 +213,13 @@ class Radar(Thing, ABC):
         else:
             self.rx_pos = rx_pos
         if tx_lo is None:
-            self.tx_lo = np.zeros(self.M_tx, dtype=int)
+            self.tx_lo = np.zeros((self.M_tx, 2))
         else:
-            self.tx_lo = tx_lo.astype(int)
+            self.tx_lo = tx_lo
         if rx_lo is None:
-            self.rx_lo = np.zeros(self.M_rx, dtype=int)
+            self.rx_lo = np.zeros((self.M_rx))
         else:
-            self.rx_lo = rx_lo.astype(int)
+            self.rx_lo = rx_lo
         if tx_ant_gains is None:
             self.tx_ant_gains = np.ones(self.M_tx)  # isotropic radiator
         else:
@@ -240,8 +240,9 @@ class Radar(Thing, ABC):
         self.T_ref = T_ref
         self.targets = None
         self.rp = None  # range profile
-        self.lo = np.append(self.tx_lo, self.rx_lo)
-        self.lo = np.unique(self.lo)
+        self.lo_idx = np.append(self.tx_lo[0], self.rx_lo).astype(int)
+        self.lo_idx = np.unique(self.lo_idx)
+        self.tx_phase_mod = self.tx_lo[1]
 
         # slow time vec. (unif. chirp sequence)
         self.t_s = np.arange(N_s) * T_s
@@ -478,13 +479,15 @@ class Radar(Thing, ABC):
                 win = scipy.signal.windows.get_window(win_doppler, self.N_s)
                 win = win[np.newaxis, np.newaxis, :, np.newaxis]
                 z = 2 ** nextpow2(zp_fact * self.N_s)
-                self.rd = np.fft.fft(self.rp, n=z, axis=2)
+                self.rd = np.fft.fftshift(np.fft.fft(self.rp, n=z, axis=2), axes=2)
                 if process_noisy:
                     if self.rp_noisy is None:
                         raise TypeError(
                             "rp_noisy is None. It has to be calculated first"
                         )
-                    self.rd_noisy = np.fft.fft(self.rp_noisy, n=z, axis=2)
+                    self.rd_noisy = np.fft.fftshift(
+                        np.fft.fft(self.rp_noisy, n=z, axis=2), axes=2
+                    )
             else:
                 self.rd = self.rp
 
@@ -600,13 +603,15 @@ class FMCWRadar(Radar):
 
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
-            plt.figure("Phase_course_test_plot")
+            # # test plot
+            # plt.figure("Phase_course_test_plot")
             # phase noise for transmitters
             PN_phi_seed = np.pi * (
-                1 - 2 * np.random.rand(self.lo.shape[0], int(N_PN / 2) - 1)
+                1 - 2 * np.random.rand(self.lo_idx.shape[0], int(N_PN / 2) - 1)
             )
             for tx_cntr in range(self.M_tx):
-                tx_lo_idx = np.squeeze(np.where(self.lo == self.tx_lo[tx_cntr]))
+                phi_mod = self.tx_phase_mod[tx_cntr] * chirp_cntr
+                tx_lo_idx = np.squeeze(np.where(self.lo_idx == self.tx_lo[0, tx_cntr]))
                 phi = np.hstack(
                     (
                         [0],
@@ -616,11 +621,11 @@ class FMCWRadar(Radar):
                     )
                 )
                 vekPN_LO = np.real(np.fft.ifft(N_PN * S_f * np.exp(1j * phi)))
-                # test plot
-                plt.plot(t * 1e6, vekPN_LO, label=f"TX - LO {tx_lo_idx}")
-                plt.xlabel("Time in us")
+                # # test plot
+                # plt.plot(t * 1e6, vekPN_LO, label=f"TX - LO {tx_lo_idx}")
+                # plt.xlabel("Time in us")
                 for rx_cntr in range(self.M_rx):
-                    rx_lo_idx = np.squeeze(np.where(self.lo == self.rx_lo[rx_cntr]))
+                    rx_lo_idx = np.squeeze(np.where(self.lo_idx == self.rx_lo[rx_cntr]))
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
                         phi_shift = PN_phi_seed[rx_lo_idx] - 2 * np.pi * f_fft_SSB_vec[
@@ -630,8 +635,8 @@ class FMCWRadar(Radar):
                         vekPN_RX = np.real(
                             np.fft.ifft(N_PN * S_f * np.exp(1j * phi_shift))
                         )
-                        # test plot
-                        plt.plot(t * 1e6, vekPN_RX, label=f"RX - LO {rx_lo_idx}")
+                        # # test plot
+                        # plt.plot(t * 1e6, vekPN_RX, label=f"RX - LO {rx_lo_idx}")
                         # radar equation step-by-step
                         p_tx_eirp = self.tx_powers[tx_cntr] * self.tx_ant_gains[tx_cntr]
                         s_targ = p_tx_eirp / (
@@ -663,82 +668,22 @@ class FMCWRadar(Radar):
                                 self.T_s,
                                 cplx=not (self.if_real),
                             )
-                            * np.exp(2 * np.pi * (vekPN_RX - vekPN_LO)).real
+                            * np.exp(2j * np.pi * (vekPN_RX - vekPN_LO))
+                            * np.exp(1j * phi_mod)
                         )
-                        # test plot
-                        plt.plot(
-                            t * 1e6,
-                            vekPN_RX - vekPN_LO,
-                            label=f"TX {tx_cntr} - RX {rx_cntr}",
-                        )
+                        # # test plot
+                        # plt.plot(
+                        #     t * 1e6,
+                        #     vekPN_RX - vekPN_LO,
+                        #     label=f"TX {tx_cntr} - RX {rx_cntr}",
+                        # )
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
-            # test plot
-            plt.xlim([0, 50])
-            plt.grid()
-            plt.legend()
-            plt.show()
+            # # test plot
+            # plt.xlim([0, 50])
+            # plt.grid()
+            # plt.legend()
+            # plt.show()
         self.generate_AWGN()
-
-    def genereate_pn(
-        L_freqs_vec: np.array, L_dB_vec: np.array, N_s: int, T_s: float, tau
-    ):
-
-        N_s_pn_ss = N_s // 2  # TODO to be checked
-        T_s_pn_ss = T_s * 2  # due to doubled fs and Ns by stacking
-
-        # interpolate phase noise to IF bin frequencies
-        f_fft_SSB_vec = np.arange(N_s_pn_ss) / (
-            T_s_pn_ss * N_s_pn_ss
-        )  # frequencies without ZP
-        f_fft_IF_tmp = f_fft_SSB_vec.copy()
-        # set first FFT frequency point to 1 Hz
-        # to avoid problems with the interpolation in semilogx-form
-        f_fft_IF_tmp[0] = 1
-
-        L_vec = 10 ** (L_dB_vec / 10)  # PN psd specification (linear, rel. to carrier)
-        # scale to bin width
-        # factor 2 depends on type of PN spec (SSB vs. DSB) and conversion of L to S
-        # smaini uses factor 1/2 when coming from L
-        O_vec_bin = np.sqrt(
-            (L_vec / 2) * (1 / (N_s_pn_ss * T_s_pn_ss))
-        )  # phase noise spectrum wtihout phase spectrum added yet
-        # interpolated array
-        S_f_vec_bin_dB = np.interp(
-            np.log10(f_fft_IF_tmp), np.log10(L_freqs_vec), 20 * np.log10(O_vec_bin)
-        )
-        S_f_vec_bin = 10 ** (S_f_vec_bin_dB / 20)
-
-        S_f = S_f_vec_bin.copy()
-        S_f[0] = 0  # dc
-        S_f = np.hstack((S_f, 0, S_f[:0:-1]))  # now we cover 0...2*fs_SSB
-        fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
-        N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
-
-        PN_phi_seed = np.pi * (1 - 2 * np.random.rand(tau.shape[0], int(N_PN / 2) - 1))
-
-        # add zero tau for transmitter phase noise
-        tau = np.concatenate((np.zeros(tau.shape[0:-1])[:, :, None], tau), axis=2)
-
-        phi_shift = (
-            PN_phi_seed[:, None, None, :]
-            - 2
-            * np.pi
-            * f_fft_SSB_vec[None, None, None, 1 : int(N_s_pn_ss)]
-            * tau[:, :, :, None]
-        )
-        phi_shift = np.concatenate(
-            (
-                np.zeros(np.append(phi_shift.shape[0:-1], 1)),
-                phi_shift,
-                np.zeros(np.append(phi_shift.shape[0:-1], 1)),
-                -phi_shift[::-1],
-            ),
-            axis=3,
-        )
-        vekPN_shift_freq_domain = N_PN * S_f * np.exp(1j * phi_shift)
-        vekPN_shift = np.real(np.fft.ifft(vekPN_shift_freq_domain, axis=3))
-
-        return vekPN_shift
 
     def generate_AWGN(self):
         fs = 1 / self.T_f

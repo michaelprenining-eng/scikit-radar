@@ -12,16 +12,16 @@ fc = 76.5e9
 N_f = 4 * 512  # number of fast-time samples
 fs_f = 4 * 1e6  # fast-time sampling rate
 Ts_s = (N_f - 1) / fs_f  # slow-time sampling interval
-N_s = 1  # number of slow-time samples
+N_s = 256  # number of slow-time samples
 
-tx_pos = np.array([[0], [0], [0]])
+tx_pos = np.array([[0, 0], [0, 0], [0, 0]])
 rx_pos = np.array([[0, 0], [0, 0], [0, 0]])
-tx_lo = np.array([0])
+tx_lo = np.array([[0, 1], [0, np.pi]])
 rx_lo = np.array([0, 1])
 
 radar_pos = np.array([[0], [0], [0]])
 L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) / 2
-L_dB_vec = np.array([-65, -65, -85, -115, -115])  # * 1.5
+L_dB_vec = np.array([-65, -65, -85, -115, -115])
 radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     B=B,
     fc=fc,
@@ -35,23 +35,25 @@ radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     rx_pos=rx_pos,
     tx_lo=tx_lo,
     rx_lo=rx_lo,
-    tx_ant_gains=np.array([15]),
+    tx_ant_gains=np.array([15, 15]),
     rx_ant_gains=np.array([10, 10]),
     pos=radar_pos,
     name="First radar",
-    if_real=True,
+    if_real=False,
 )
 
-target_pos = np.array([[0], [11.3], [0]])
+# target_pos = np.array([[0], [11.3], [0]])
 target_pos1 = np.array([[0], [40], [0]])
-target = skradar.Target(rcs=10, pos=target_pos, name="Static target, 10 sqm")
+# target = skradar.Target(rcs=10, pos=target_pos, name="Static target, 10 sqm")
 target1 = skradar.Target(rcs=10, pos=target_pos1, name="Static target, 10 sqm")
 
-scene = skradar.Scene([radar], [target, target1])
+scene = skradar.Scene([radar], [target1])
 
 radar.sim_chirps()
 
-radar.range_compression(zp_fact=32)
+zp_fact_range = 4
+radar.range_compression(zp_fact=zp_fact_range)
+radar.doppler_processing(zp_fact=4, win_doppler="hann")
 
 target_dists = radar.ranges / 2  # halve values to account for round-trip ranges
 target_dists_plot = target_dists[: len(radar.ranges) // 2]
@@ -85,4 +87,15 @@ plt.legend()
 plt.grid(True)
 plt.xlabel("Range (m)")
 plt.ylabel("RMS power (dBV)")
+plt.show()
+print(radar.rd_noisy.shape)
+plt.figure("rd_map")
+plt.imshow(
+    20 * np.log(np.abs(radar.rd[0, 0, :, : N_f * zp_fact_range // 2])),
+    aspect="auto",
+)
+# plt.imshow(
+#     np.abs(radar.rd[0, 1, :,: N_f * zp_fact_range // 2]),
+#     aspect="auto",
+# )
 plt.show()

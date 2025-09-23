@@ -158,6 +158,7 @@ class Radar(Thing, ABC):
         T_s: float,
         tx_ant_gains: np.ndarray = None,
         rx_ant_gains: np.ndarray = None,
+        lo_spec: np.ndarray = None,
         tx_lo: np.ndarray = None,
         rx_lo: np.ndarray = None,
         tx_powers: np.ndarray = None,
@@ -212,6 +213,10 @@ class Radar(Thing, ABC):
             raise ValueError(f"Expected rx_pos with 3 rows but got {rx_pos.shape[0]}.")
         else:
             self.rx_pos = rx_pos
+        if lo_spec is None:
+            self.lo_spec = np.zeros((1, 3))
+        else:
+            self.lo_spec = lo_spec
         if tx_lo is None:
             self.tx_lo = np.zeros((self.M_tx, 2))
         else:
@@ -240,8 +245,6 @@ class Radar(Thing, ABC):
         self.T_ref = T_ref
         self.targets = None
         self.rp = None  # range profile
-        self.lo_idx = np.append(self.tx_lo[0], self.rx_lo).astype(int)
-        self.lo_idx = np.unique(self.lo_idx)
         self.tx_phase_mod = self.tx_lo[1]
 
         # slow time vec. (unif. chirp sequence)
@@ -600,20 +603,17 @@ class FMCWRadar(Radar):
         fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
         N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
 
-        # test plot time axis
-        t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
-
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             # # test plot
             # plt.figure("Phase_course_test_plot")
             # phase noise for transmitters
             PN_phi_seed = np.pi * (
-                1 - 2 * np.random.rand(self.lo_idx.shape[0], int(N_PN / 2) - 1)
+                1 - 2 * np.random.rand(self.lo_spec.shape[1], int(N_PN / 2) - 1)
             )
             for tx_cntr in range(self.M_tx):
                 phi_mod = self.tx_phase_mod[tx_cntr] * chirp_cntr
-                tx_lo_idx = np.squeeze(np.where(self.lo_idx == self.tx_lo[0, tx_cntr]))
+                tx_lo_idx = self.tx_lo[0, tx_cntr].astype(int)
                 phi = np.hstack(
                     (
                         [0],
@@ -627,7 +627,7 @@ class FMCWRadar(Radar):
                 # plt.plot(t * 1e6, vekPN_LO, label=f"TX - LO {tx_lo_idx}")
                 # plt.xlabel("Time in us")
                 for rx_cntr in range(self.M_rx):
-                    rx_lo_idx = np.squeeze(np.where(self.lo_idx == self.rx_lo[rx_cntr]))
+                    rx_lo_idx = self.rx_lo[rx_cntr].astype(int)
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
                         phi_shift = PN_phi_seed[rx_lo_idx] - 2 * np.pi * f_fft_SSB_vec[
@@ -660,33 +660,62 @@ class FMCWRadar(Radar):
                         A_pk = np.sqrt(2) * np.sqrt(
                             p_rx * self.Z0
                         )  # power to amplitude
-                        s_if_tmp = (
-                            A_pk
-                            * sim_FMCW_if(
-                                dist,
-                                self.B,
-                                self.fc,
-                                self.N_f,
-                                self.T_s,
-                                cplx=not (self.if_real),
-                            )
-                            * np.exp(2j * np.pi * (vekPN_RX - vekPN_LO))
-                            * np.exp(1j * phi_mod)
-                        )
-                        # # test plot
-                        # plt.plot(
-                        #     t * 1e6,
-                        #     vekPN_RX - vekPN_LO,
-                        #     label=f"TX {tx_cntr} - RX {rx_cntr}",
-                        # )
-                        self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
-            # # test plot
-            # plt.xlim([0, 50])
-            # plt.grid()
-            # plt.legend()
-            # plt.show()
-        self.generate_AWGN()
 
+                        if self.if_real:
+                            s_if_tmp = (
+                                A_pk
+                                * sim_FMCW_if(
+                                    dist,
+                                    self.B,
+                                    self.fc,
+                                    self.N_f,
+                                    self.T_s,
+                                    cplx=not (self.if_real),
+                                )
+                                * np.cos(
+                                    2 * np.pi * (vekPN_RX - vekPN_LO)
+                                    + phi_mod
+                                )
+                            )
+                        else:
+                            s_if_tmp = (
+                                A_pk
+                                * sim_FMCW_if(
+                                    dist,
+                                    self.B,
+                                    self.fc,
+                                    self.N_f,
+                                    self.T_s,
+                                    cplx=not (self.if_real),
+                                )
+                                * np.exp(
+                                    2j * np.pi * (vekPN_RX - vekPN_LO)
+                                    + 1j * phi_mod
+                                )
+                            )
+                        self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
+        self.generate_AWGN()
+    
+    def apply_errors(self):
+        t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
+
+        # phase error due to frequency offset      
+        phase_course_f0_offset = (
+            2
+            * np.pi
+            * (self.lo_spec[0, self.rx_lo][None,:,None] - self.lo_spec[0, self.tx_lo[0].astype(int)][:,None,None])
+            * t[None,None,:]
+        )
+        # phase error due to slope offset
+        phase_course_delta_B = (
+            np.pi
+            * (self.lo_spec[1, self.rx_lo][None,:,None] - self.lo_spec[1, self.tx_lo[0].astype(int)][:,None,None])
+            / t[-1]
+            * t[None,None,:]**2
+        )
+        self.s_if = self.s_if * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+        self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+        
     def generate_AWGN(self):
         fs = 1 / self.T_f
         noise_std = np.sqrt(4 * self.Z0 * Boltzmann * self.T_ref * fs / 2)
@@ -701,6 +730,7 @@ class FMCWRadar(Radar):
         # multiple TXs and/or multiple targets do not add noise
         # noise will be only added for each RX, slow-time sample and fast-time sample
         tx_cntr = 0
+        self.s_if_noisy = self.s_if.copy()
         for chirp_cntr in range(self.N_s):
             for rx_cntr in range(self.M_rx):
                 self.s_if_noisy[tx_cntr, rx_cntr, chirp_cntr, :] = (

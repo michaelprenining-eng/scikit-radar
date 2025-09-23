@@ -13,13 +13,14 @@ plt.ioff()
 np.random.seed(1)
 
 # load radar configs
-RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\30deg_calib_Tp2_20250918_12-11-13_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\RadServe_Windows_64bit\bpsk_test_20250918_15-47-39_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\movement_test_1tx_20250923_13-10-02_1.h5"
 target_dist = 20
 calib_target_dist = 3
-frame_idx = 2000
+frame_idx = 50
 process_measurement = True
 
-# load radar parameters from file
+# load radar data from file
 with h5py.File(RADAR_FILENAME_HDF5_1, "r") as f:
     f0 = f.attrs["fStrt"][0]  # start freqeuncy
     f1 = f.attrs["fStop"][0]  # stop freqeuncy
@@ -39,11 +40,16 @@ with h5py.File(RADAR_FILENAME_HDF5_1, "r") as f:
 
     data = np.empty([NrChn, N_s, N_f])
 
-    print(f"Loaded measurement with {f["Chn1"].shape[0]} frames")
+    print(f"Loaded measurement with {f["Chn1"].shape[0]/N_s} frames")
 
     # get slow slow and fast time data for every channel of specified frame
-    for Na in range(1, NrChn + 1):
-        data[Na - 1, :, :] = f["Chn%d" % Na][frame_idx]
+    all_data = np.empty([int(f["Chn1"].shape[0]/N_s),NrChn, N_s, N_f])
+    for Na in range(1,NrChn+1):
+        ch_data = f['Chn%d'%Na]
+        ch_data_reshaped = np.reshape(ch_data, (-1,ch_data.chunks[0],ch_data.chunks[1]))
+        all_data[:,Na-1,:,:] = ch_data_reshaped
+
+    data = all_data[frame_idx]
 
     # signal parameters
     B_sw = f1 - f0  # chirp bandwidth
@@ -56,7 +62,7 @@ with h5py.File(RADAR_FILENAME_HDF5_1, "r") as f:
 
 # simulated radar sensor
 tx_pos = np.array([[0, 0], [0, 0], [0, 0]])
-rx_pos = np.array([[0, 0], [0, 0], [0, 0]])
+rx_pos = np.array([[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
 
 lambd = c0 / fc
 v_max = lambd / (4 * Ts_s)
@@ -68,7 +74,7 @@ lo_spec = np.array(
 tx_lo = np.array(
     [[0, 1], [0, np.pi]]
 )  # used LO and chirp modulation (lo idx, phase shift)
-rx_lo = np.array([0, 1])  # used LO
+rx_lo = np.array([0, 1, 0, 1])  # used LO
 
 radar_pos = np.array([[0], [0], [0]])
 L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) / 2
@@ -88,7 +94,7 @@ radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     tx_lo=tx_lo,
     rx_lo=rx_lo,
     tx_ant_gains=np.array([15, 15]),
-    rx_ant_gains=np.array([10, 10]),
+    rx_ant_gains=np.array([10, 10, 10, 10]),
     pos=radar_pos,
     name="First radar",
     if_real=False,
@@ -105,7 +111,6 @@ target2 = skradar.Target(rcs=10, pos=target_pos2, name="Calib target, 10 sqm")
 scene = skradar.Scene([radar], [target1,target2])
 
 radar.sim_chirps()
-radar.apply_errors()
 radar.merge_mimo()
 
 if process_measurement:
@@ -119,6 +124,7 @@ if process_measurement:
         print("Invalid measurement data shape")
 
 
+#radar.apply_errors()
 
 # processing
 zp_fact_range = 4
@@ -131,26 +137,19 @@ target_dists_plot = target_dists[: len(radar.ranges) // 2]
 rp_plot = 1 / (np.sqrt(2)) * radar.rp[:,:,0, : len(radar.ranges) // 2]
 rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[:,:,0, : len(radar.ranges) // 2]
 
-fig_rp, (ax_rp, ax_rp_noisy) = plt.subplots(2,1,num="range_profiles",figsize=[10,8])
+rp_plot_dB = 20 * np.log10(np.abs(rp_plot))
+fig_rp, ax_rp = plt.subplots(1,1,num="range_profiles",figsize=[10,5])
 for tx_idx in range(rp_plot.shape[0]):
     for rx_idx in range(rp_plot.shape[1]):
         ax_rp.plot(
-            target_dists_plot, 20 * np.log10(np.abs(rp_plot[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
-        )
-        ax_rp_noisy.plot(
-            target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_plot_dB[tx_idx, rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
         )
 
 ax_rp.legend()
 ax_rp.grid(True)
 ax_rp.set_xlabel("Range (m)")
-ax_rp.set_ylabel("RMS power (dBV)")
+ax_rp.set_ylabel("Normalized power (dB)")
 ax_rp.set_xlim([0, target_dists_plot[-1]])
-ax_rp_noisy.legend()
-ax_rp_noisy.grid(True)
-ax_rp_noisy.set_xlabel("Range (m)")
-ax_rp_noisy.set_ylabel("RMS power (dBV)")
-ax_rp_noisy.set_xlim([0, target_dists_plot[-1]])
 plt.show()
 
 print(radar.rd_noisy.shape)

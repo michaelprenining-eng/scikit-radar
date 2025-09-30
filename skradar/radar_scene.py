@@ -671,10 +671,10 @@ class FMCWRadar(Radar):
                                     self.N_f,
                                     self.T_s,
                                     cplx=not (self.if_real),
+                                    phi_offset=phi_mod,
                                 )
                                 * np.cos(
                                     2 * np.pi * (vekPN_RX - vekPN_LO)
-                                    + phi_mod
                                 )
                             )
                         else:
@@ -687,16 +687,17 @@ class FMCWRadar(Radar):
                                     self.N_f,
                                     self.T_s,
                                     cplx=not (self.if_real),
+                                    phi_offset=phi_mod,
                                 )
                                 * np.exp(
                                     2j * np.pi * (vekPN_RX - vekPN_LO)
-                                    + 1j * phi_mod
                                 )
                             )
                         self.s_if[tx_cntr, rx_cntr, chirp_cntr, :] += s_if_tmp
         self.generate_AWGN()
     
-    def apply_errors(self):
+    def apply_errors_unmerged(self):
+        # cross-check with apply_errors() when modified
         t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
 
         # phase error due to frequency offset      
@@ -715,6 +716,50 @@ class FMCWRadar(Radar):
         )
         self.s_if = self.s_if * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
         self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+
+    def apply_errors(self):
+        # cross-check with apply_errors_unmerged() when modified
+        t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
+
+        # phase error due to frequency offset      
+        phase_course_f0_offset = (
+            2
+            * np.pi
+            * (self.lo_spec[0, self.rx_lo][None,:,None] - self.lo_spec[0, self.tx_lo[0].astype(int)][:,None,None])
+            * t[None,None,:]
+        )
+        # phase error due to slope offset
+        phase_course_delta_B = (
+            np.pi
+            * (self.lo_spec[1, self.rx_lo][None,:,None] - self.lo_spec[1, self.tx_lo[0].astype(int)][:,None,None])
+            / t[-1]
+            * t[None,None,:]**2
+        )
+
+        # phase error due to chirp start phase
+        start_phase = (
+            2 * np.pi * np.random.rand(self.M_tx, self.M_rx, self.N_s)
+        )
+
+        # 1. transform to frequency domain (slow time frequency)
+        doppler_fft = np.fft.fft(self.s_if,n=2*self.s_if.shape[2], axis=2)
+
+        # 2. separate into multiple slow-time frequency bands
+        doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
+        doppler_bpsk = np.append(doppler_fft[:,:,:doppler_fft.shape[2]//4], doppler_fft[:,:,3*doppler_fft.shape[2]//4:], axis=2)
+        doppler_tx_split = np.vstack((doppler_std,doppler_bpsk))
+
+        # 2. apply phase shifts
+        doppler_erroneous = doppler_tx_split * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+
+        # 3. transform to time domain
+        time_domain = np.fft.ifft(doppler_erroneous, axis=2)
+
+        # 4. add start phase error per chirp
+        time_domain_erroneous = time_domain# * np.exp(1j*start_phase)[:,:,:,None]
+
+        self.s_if = np.sum(time_domain_erroneous, axis=0, keepdims=True)
+
         
     def generate_AWGN(self):
         fs = 1 / self.T_f

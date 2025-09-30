@@ -8,6 +8,14 @@ import matplotlib.pyplot as plt
 import skradar
 from scipy.constants import speed_of_light as c0
 
+from matplotlib import rcParams
+plt.rcParams['text.latex.preamble']=r"\usepackage{lmodern}"
+params = {'text.usetex' : True,
+          'font.size' : 11,
+          'font.family' : 'lmodern',
+          }
+plt.rcParams.update(params) 
+
 plt.ioff()
 np.random.seed(1)
 B = 0.9e9
@@ -28,13 +36,13 @@ lo_spec = np.array(
     [[0, fs_f / 100], [0,10e-5 * B]]
 )  # specifications of available LOs (delta fc, delta B)
 tx_lo = np.array(
-    [[0, 1], [0, np.pi]]
-)  # used LO and chirp modulation (lo idx, phase shift)
+    [[0, 1], [0, np.pi/2]]
+)  # used LO and chirp modulation (lo idx, phase shift before transmitting)
 rx_lo = np.array([0, 1])  # used LO
 
 radar_pos = np.array([[0], [0], [0]])
 L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) / 2
-L_dB_vec = np.array([-65, -65, -85, -115, -115]) #  * 10
+L_dB_vec = np.array([-65, -65, -85, -115, -115])#  * 10
 radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     B=B,
     fc=fc,
@@ -53,13 +61,13 @@ radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     rx_ant_gains=np.array([10, 10]),
     pos=radar_pos,
     name="First radar",
-    if_real=False,
+    if_real=True,
 )
 
 # target_pos = np.array([[0], [11.3], [0]])
 target_pos1 = np.array([[0], [40], [0]])
 target_pos2 = np.array([[0], [5], [0]])
-target_v1 = np.array([[0], [2], [0]])
+target_v1 = np.array([[0], [-2], [0]])
 # target = skradar.Target(rcs=10, pos=target_pos, name="Static target, 10 sqm")
 target1 = skradar.Target(rcs=10, pos=target_pos1,vel=target_v1, name="Moving target, 10 sqm")
 target2 = skradar.Target(rcs=10, pos=target_pos2, name="Calib target, 10 sqm")
@@ -67,12 +75,10 @@ target2 = skradar.Target(rcs=10, pos=target_pos2, name="Calib target, 10 sqm")
 scene = skradar.Scene([radar], [target1,target2])
 
 radar.sim_chirps()
-radar.apply_errors()
-radar.merge_mimo()
-
-
-
-
+#radar.s_if_noisy = radar.s_if.copy()
+radar.apply_errors_unmerged() # for some evaluation and debugging with simulation only
+#radar.merge_mimo()
+#radar.apply_errors()
 
 # processing
 zp_fact_range = 4
@@ -85,32 +91,38 @@ target_dists_plot = target_dists[: len(radar.ranges) // 2]
 rp_plot = 1 / (np.sqrt(2)) * radar.rp[:,:,0, : len(radar.ranges) // 2]
 rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[:,:,0, : len(radar.ranges) // 2]
 
-fig_rp, (ax_rp, ax_rp_noisy) = plt.subplots(2,1,num="range_profiles",figsize=[10,8])
+# fig_rp, (ax_rp, ax_rp_noisy) = plt.subplots(2,1,num="range_profiles",figsize=[10,8])
+fig_rp, ax_rp = plt.subplots(1,1,num="range_profiles",figsize=[10,5]) # in inches -> adjust for presentation!
 for tx_idx in range(rp_plot.shape[0]):
     for rx_idx in range(rp_plot.shape[1]):
         ax_rp.plot(
             target_dists_plot, 20 * np.log10(np.abs(rp_plot[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
         )
-        ax_rp_noisy.plot(
-            target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
-        )
+        # ax_rp_noisy.plot(
+        #     target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
+        # )
 
 ax_rp.legend()
 ax_rp.grid(True)
 ax_rp.set_xlabel("Range (m)")
 ax_rp.set_ylabel("RMS power (dBV)")
 ax_rp.set_xlim([0, target_dists_plot[-1]])
-ax_rp_noisy.legend()
-ax_rp_noisy.grid(True)
-ax_rp_noisy.set_xlabel("Range (m)")
-ax_rp_noisy.set_ylabel("RMS power (dBV)")
-ax_rp_noisy.set_xlim([0, target_dists_plot[-1]])
-plt.show()
+# ax_rp_noisy.legend()
+# ax_rp_noisy.grid(True)
+# ax_rp_noisy.set_xlabel("Range (m)")
+# ax_rp_noisy.set_ylabel("RMS power (dBV)")
+# ax_rp_noisy.set_xlim([0, target_dists_plot[-1]])
+#plt.show()
+figure_name ="test_rp_plot"
+plt.savefig("python_plots/"+figure_name+".eps",
+            papertype = 'a4',
+            bbox_inches = 'tight'
+            )
 
 print(radar.rd_noisy.shape)
 plt.figure("rd_map")
 plt.imshow(
-    20 * np.log(np.abs(radar.rd[0, 0, :, : N_f * zp_fact_range // 2])),
+    20 * np.log(np.abs(radar.rd[1, 1, :, : N_f * zp_fact_range // 2])),
     aspect="auto",origin="lower",extent=[0,target_dists_plot[-1],-v_max,v_max]
 )
 plt.ylabel("v in m/s")

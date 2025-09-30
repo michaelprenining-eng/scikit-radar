@@ -13,6 +13,7 @@ def sim_FMCW_if(
     v: float = 0,
     c: float = c0,
     cplx: bool = False,
+    phi_offset:float=0,
 ) -> np.ndarray:
     """
     This function simulates the intermediate frequency (IF) signal of a
@@ -55,9 +56,9 @@ def sim_FMCW_if(
     k_ramp = B / T
     tau = (r + v * t) / c  # round-trip time
     if cplx:
-        s_if = np.exp(1j * 2 * np.pi * (fc * tau + k_ramp * tau * t))
+        s_if = np.exp(1j * 2 * np.pi * (fc * tau + k_ramp * tau * t)+phi_offset)
     else:
-        s_if = np.cos(2 * np.pi * (fc * tau + k_ramp * tau * t))
+        s_if = np.cos(2 * np.pi * (fc * tau + k_ramp * tau * t)+phi_offset)
     return s_if
 
 

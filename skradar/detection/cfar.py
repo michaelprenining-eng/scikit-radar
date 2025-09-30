@@ -7,6 +7,7 @@ import numpy as np
 class CFARMode(Enum):
     CA = auto()
     CAGO = auto()
+    CASO = auto()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,6 +47,8 @@ def cfar_threshold(sig: np.ndarray, cfg: CFARConfig = DEFAULT_CFG):
             corr = 0.5 * (left + right)
         case CFARMode.CAGO:
             corr = np.maximum(left, right)
+        case CFARMode.CASO:
+            corr = np.minimum(left, right)
         case _:
             raise ValueError(f"CFAR mode '{str(cfg.mode)}' is not supported")
 

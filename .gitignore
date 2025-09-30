@@ -130,3 +130,9 @@ dmypy.json
 
 # IDE specific folders
 .idea/
+
+# pictures
+.eps
+.pdf
+.jpg
+.jpeg

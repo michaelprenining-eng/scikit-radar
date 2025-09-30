@@ -12,11 +12,20 @@ import h5py
 import time
 import scipy
 
+from matplotlib import rcParams
+plt.rcParams['text.latex.preamble']=r"\usepackage{lmodern}"
+params = {'text.usetex' : True,
+          'font.size' : 11,
+          'font.family' : 'lmodern',
+          }
+plt.rcParams.update(params) 
+
 plt.ioff()
 np.random.seed(1)
 
 # load radar configs
-RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\test_20250923_12-31-52_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_single_static_20250930_13-33-19_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\single_static_20250930_13-35-59_1.h5"
 #RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_282mm_20250924_13-25-49_1.h5"
 #RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_two_targets_20250924_13-38-41_1.h5"
 process_measurement = True
@@ -25,7 +34,7 @@ min_target_range = 1
 
 # simulation parameters
 target_dist = 20
-calib_target_dist = 2.82
+calib_target_dist = 3.8
 
 # processing settings
 zp_fact_range = 4*2
@@ -82,10 +91,10 @@ radar_pos = np.array([[0], [0], [0]])
 
 # lo definitions
 lo_error_spec = np.array(
-    [[0,fs_f / 200], [0,0*10e-5 * B_sw]]
+    [[0,fs_f / 500], [0,10e-5 * B_sw]]
 )  # specifications of available LOs (delta fc, delta B)
 tx_lo = np.array(
-    [[0, 1], [0, np.pi]]
+    [[1, 0], [0, np.pi]]
 )  # used LO and chirp modulation (lo idx, phase shift)
 rx_lo = np.array([0, 1])  # used LO
 
@@ -142,7 +151,7 @@ else:
 # split signal into slow time frequency bands
 
 # apply errors
-#radar.apply_errors()
+radar.apply_errors()
 
 # processing
 radar.range_compression(zp_fact=zp_fact_range)
@@ -153,43 +162,58 @@ target_dists_plot = target_dists[: len(radar.ranges) // 2]
 calib_peak_search_idx = np.where(np.abs(target_dists - calib_target_dist) < calib_peak_tolerance)[0]
 
 # sqrt(2) to convert to RMS power from sinusoidal peak value
+rp_noisy_scaled = 1 / (np.sqrt(2)) * radar.rp_noisy
+rp_noisy_abs_chirp_mean = np.mean(np.abs(rp_noisy_scaled), axis=2)
 rp_scaled = 1 / (np.sqrt(2)) * radar.rp
 rp_abs_chirp_mean = np.mean(np.abs(rp_scaled), axis=2)
 
 # find clibration target peak
-peak_pos_idx = np.argmax(rp_abs_chirp_mean[:,:,calib_peak_search_idx],axis=2) + calib_peak_search_idx[0]
+peak_pos_idx = np.argmax(rp_noisy_abs_chirp_mean[:,:,calib_peak_search_idx],axis=2) + calib_peak_search_idx[0]
 print(f"Calib target pos = {np.round(target_dists[peak_pos_idx], 2)}m")
 
 CFARConfig = skradar.detection.cfar.CFARConfig(train_cells=8*zp_fact_range, guard_cells=4*zp_fact_range,
-                                               pfa=1e-4, mode=skradar.detection.cfar.CFARMode.CASO)
+                                               pfa=1e-4, mode=skradar.detection.cfar.CFARMode.CAGO)
 
+rp_noisy_plot_dB = 20 * np.log10(rp_noisy_abs_chirp_mean)[:,:,: len(radar.ranges) // 2]
 rp_plot_dB = 20 * np.log10(rp_abs_chirp_mean)[:,:,: len(radar.ranges) // 2]
-threshold = np.zeros_like(rp_plot_dB)
+threshold = np.zeros_like(rp_noisy_plot_dB)
 fig_rp, ax_rp = plt.subplots(1,1,num="range_profiles",figsize=[10,5])
-for tx_idx in range(rp_scaled.shape[0]):
-    for rx_idx in range(rp_scaled.shape[1]):
-        threshold[tx_idx,rx_idx] = 20 * np.log10(skradar.detection.cfar.cfar_threshold(rp_abs_chirp_mean[tx_idx,rx_idx,: len(radar.ranges) // 2], cfg = CFARConfig))
-        target_peaks = scipy.signal.find_peaks(rp_plot_dB[tx_idx, rx_idx], height = threshold[tx_idx,rx_idx], distance=2*zp_fact_range)[0]
+for tx_idx in range(rp_noisy_scaled.shape[0]):
+    for rx_idx in range(1):#rp_noisy_scaled.shape[1]):
+        threshold[tx_idx,rx_idx] = 20 * np.log10(skradar.detection.cfar.cfar_threshold(rp_noisy_abs_chirp_mean[tx_idx,rx_idx,: len(radar.ranges) // 2], cfg = CFARConfig))
+        target_peaks = scipy.signal.find_peaks(rp_noisy_plot_dB[tx_idx, rx_idx], height = threshold[tx_idx,rx_idx], distance=2*zp_fact_range)[0]
         target_peaks = target_peaks[target_dists_plot[target_peaks]>min_target_range]
         ax_rp.plot(
-            target_dists_plot, rp_plot_dB[tx_idx, rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_plot_dB[tx_idx, rx_idx], label=f"tx{tx_idx}, rx{rx_idx}"
         )
         ax_rp.plot(
-            target_dists_plot, threshold[tx_idx,rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_noisy_plot_dB[tx_idx, rx_idx], label=f"tx{tx_idx}, rx{rx_idx} (erroneous)"
         )
-        ax_rp.vlines(target_dists_plot[target_peaks],ymin=-10,ymax=5)
+        # ax_rp.plot(
+        #     target_dists_plot, threshold[tx_idx,rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+        # )
+        # ax_rp.vlines(target_dists_plot[target_peaks],ymin=-10,ymax=5)
+
+np.save("error", np.append(target_dists_plot, rp_noisy_plot_dB))
 
 ax_rp.legend()
 ax_rp.grid(True)
 ax_rp.set_xlabel("Range (m)")
-ax_rp.set_ylabel("Normalized power (dB)")
+ax_rp.set_ylabel("Magnitude (dBV)")
 ax_rp.set_xlim([0, target_dists_plot[-1]/5])
-plt.show()
+
+figure_name ="test_rp_comparison"
+plt.savefig("python_plots/"+figure_name+".eps",
+            papertype = 'a4',
+            bbox_inches = 'tight'
+            )
+
+# plt.show()
 
 print(radar.rd_noisy.shape)
 plt.figure("rd_map")
 plt.imshow(
-    20 * np.log(np.abs(radar.rd[0, 0, :, : N_f * zp_fact_range // 2])),
+    20 * np.log(np.abs(radar.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])),
     aspect="auto",origin="lower",extent=[0,target_dists_plot[-1],-v_max,v_max]
 )
 plt.ylabel("v in m/s")

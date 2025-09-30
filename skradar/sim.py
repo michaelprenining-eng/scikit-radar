@@ -56,7 +56,7 @@ def sim_FMCW_if(
     k_ramp = B / T
     tau = (r + v * t) / c  # round-trip time
     if cplx:
-        s_if = np.exp(1j * 2 * np.pi * (fc * tau + k_ramp * tau * t)+phi_offset)
+        s_if = np.exp(1j * 2 * np.pi * (fc * tau + k_ramp * tau * t)+ 1j*phi_offset)
     else:
         s_if = np.cos(2 * np.pi * (fc * tau + k_ramp * tau * t)+phi_offset)
     return s_if

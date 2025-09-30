@@ -36,7 +36,7 @@ lo_spec = np.array(
     [[0, fs_f / 100], [0,10e-5 * B]]
 )  # specifications of available LOs (delta fc, delta B)
 tx_lo = np.array(
-    [[0, 1], [0, np.pi/2]]
+    [[0, 1], [0, np.pi]]
 )  # used LO and chirp modulation (lo idx, phase shift before transmitting)
 rx_lo = np.array([0, 1])  # used LO
 
@@ -61,7 +61,7 @@ radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     rx_ant_gains=np.array([10, 10]),
     pos=radar_pos,
     name="First radar",
-    if_real=True,
+    if_real=False,
 )
 
 # target_pos = np.array([[0], [11.3], [0]])
@@ -91,12 +91,14 @@ target_dists_plot = target_dists[: len(radar.ranges) // 2]
 rp_plot = 1 / (np.sqrt(2)) * radar.rp[:,:,0, : len(radar.ranges) // 2]
 rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[:,:,0, : len(radar.ranges) // 2]
 
+rp_plot_dB = 20 * np.log10(np.abs(rp_plot))
+
 # fig_rp, (ax_rp, ax_rp_noisy) = plt.subplots(2,1,num="range_profiles",figsize=[10,8])
 fig_rp, ax_rp = plt.subplots(1,1,num="range_profiles",figsize=[10,5]) # in inches -> adjust for presentation!
 for tx_idx in range(rp_plot.shape[0]):
     for rx_idx in range(rp_plot.shape[1]):
         ax_rp.plot(
-            target_dists_plot, 20 * np.log10(np.abs(rp_plot[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_plot_dB[tx_idx,rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
         )
         # ax_rp_noisy.plot(
         #     target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"
@@ -122,7 +124,7 @@ plt.savefig("python_plots/"+figure_name+".eps",
 print(radar.rd_noisy.shape)
 plt.figure("rd_map")
 plt.imshow(
-    20 * np.log(np.abs(radar.rd[1, 1, :, : N_f * zp_fact_range // 2])),
+    20 * np.log(np.abs(radar.rd[0, 1, :, : N_f * zp_fact_range // 2])),
     aspect="auto",origin="lower",extent=[0,target_dists_plot[-1],-v_max,v_max]
 )
 plt.ylabel("v in m/s")

@@ -76,7 +76,7 @@ scene = skradar.Scene([radar], [target1,target2])
 
 radar.sim_chirps()
 #radar.s_if_noisy = radar.s_if.copy()
-radar.apply_errors_unmerged() # for some evaluation and debugging with simulation only
+radar.apply_errors_unmerged() # for some evaluation and debugging with simulation only TODO: modification for real signals needed
 #radar.merge_mimo()
 #radar.apply_errors()
 
@@ -92,13 +92,14 @@ rp_plot = 1 / (np.sqrt(2)) * radar.rp[:,:,0, : len(radar.ranges) // 2]
 rp_plot_noisy = 1 / (np.sqrt(2)) * radar.rp_noisy[:,:,0, : len(radar.ranges) // 2]
 
 rp_plot_dB = 20 * np.log10(np.abs(rp_plot))
+rp_plot_noisy_dB = 20 * np.log10(np.abs(rp_plot_noisy))
 
 # fig_rp, (ax_rp, ax_rp_noisy) = plt.subplots(2,1,num="range_profiles",figsize=[10,8])
 fig_rp, ax_rp = plt.subplots(1,1,num="range_profiles",figsize=[10,5]) # in inches -> adjust for presentation!
 for tx_idx in range(rp_plot.shape[0]):
     for rx_idx in range(rp_plot.shape[1]):
         ax_rp.plot(
-            target_dists_plot, rp_plot_dB[tx_idx,rx_idx] - np.max(rp_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_plot_noisy_dB[tx_idx,rx_idx] - np.max(rp_plot_noisy_dB), label=f"tx{tx_idx}, rx{rx_idx}"
         )
         # ax_rp_noisy.plot(
         #     target_dists_plot, 20 * np.log10(np.abs(rp_plot_noisy[tx_idx,rx_idx])), label=f"tx{tx_idx}, rx{rx_idx}"

@@ -710,10 +710,10 @@ class FMCWRadar(Radar):
             / t[-1]
             * t[None,None,:]**2
         )
-        # self.s_if = self.s_if * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+        
         self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
 
-    def apply_errors(self):
+    def apply_errors_bpsk(self):
         # cross-check with apply_errors_unmerged() when modified
         t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
 

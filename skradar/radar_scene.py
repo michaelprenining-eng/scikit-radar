@@ -336,7 +336,18 @@ class Radar(Thing, ABC):
         # raise NotImplementedError("Function not implemented yet")
 
     def extract_mimo(self):
-        raise NotImplementedError("Function not implemented yet")
+
+        # 1. transform to frequency domain (slow time frequency)
+        doppler_fft = np.fft.fft(self.s_if_noisy,n=2*self.s_if_noisy.shape[2], axis=2)
+
+        # 2. separate into multiple slow-time frequency bands
+        doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
+        doppler_bpsk = np.append(doppler_fft[:,:,:doppler_fft.shape[2]//4], doppler_fft[:,:,3*doppler_fft.shape[2]//4:], axis=2)
+        doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
+
+        # 2. transform to time domain
+        self.s_if_noisy = np.fft.ifft(doppler_tx_split, axis=2)
+        # raise NotImplementedError("Function not implemented yet")
 
     def angle_proc_bp(
         self, ranges_bp: np.ndarray, angles_bp: np.ndarray, process_noisy: bool = True
@@ -738,7 +749,7 @@ class FMCWRadar(Radar):
         )
 
         # 1. transform to frequency domain (slow time frequency)
-        doppler_fft = np.fft.fft(self.s_if,n=2*self.s_if.shape[2], axis=2)
+        doppler_fft = np.fft.fft(self.s_if_noisy,n=2*self.s_if_noisy.shape[2], axis=2)
 
         # 2. separate into multiple slow-time frequency bands
         doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]

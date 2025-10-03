@@ -41,7 +41,7 @@ tx_lo = np.array(
 rx_lo = np.array([0, 1])  # used LO
 
 radar_pos = np.array([[0], [0], [0]])
-L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) / 2
+L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) #/ 2
 L_dB_vec = np.array([-65, -65, -85, -115, -115])#  * 10
 radar = skradar.FMCWRadar(  # add chirp phase modulation as parameter
     B=B,

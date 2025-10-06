@@ -32,21 +32,22 @@ RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\mea
 #RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\hpf_18_far_single_static_20251002_18-40-31_1.h5"
 #RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_282mm_20250924_13-25-49_1.h5"
 #RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_two_targets_20250924_13-38-41_1.h5"
+#RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_far_single_static_20251006_14-20-25_1.h5"
 
-frame_idx =100
+frame_idx =20 # 39 same range bin
 min_target_range = 1 # omit detection of leakage peak
-nr_of_targets = 2 # number of peak positions to detect
-range_zoom = 1
+nr_of_targets = 1 # number of peak positions to detect
+range_zoom = 2
 axis_frequency = False  # show IF frequency on range profile
-calib_target_dist = 3.2 # used also for simulation
+calib_target_dist = 5.3 # used also for simulation
 calib_peak_tolerance = 0.1 # in m
 second_target_dist = 20
 
 # processing settings
 zp_fact_range = 4*2
 zp_fact_doppler = 4*2
-single_chirp_analysis = True
-chirp_idx = 0 # for range profile
+single_chirp_analysis = False
+chirp_idx = 6 # for range profile 5
 
 # calibration/static target
 calib_target_pos = np.array([[0], [calib_target_dist], [0]])
@@ -101,12 +102,14 @@ v_max = lambd / (4 * Ts_s)
 
 # simulated radar sensor (MIMO with 2x 1Tx-1Rx)
 tx_pos = np.array([[0, 0], [0, 0], [0, 0]])
+#tx_pos = np.array([[0], [0], [0]])
 rx_pos = np.array([[0, 0], [0, 0], [0, 0]])
 radar_pos = np.array([[0], [0], [0]])
 
 # lo definitions
 lo_error_spec = np.array(
-    [[0,fs_f / 200], [0,0*10e-5 * B_sw]]
+    #[[0,1 * fs_f / 200], [0,1*10e-5 * B_sw]]
+    [[0,1 * fs_f / 1000], [0,1*10e-6 * B_sw]]
 )  # specifications of available LOs (delta fc, delta B)
 
 # two transmitter with bpsk
@@ -122,7 +125,7 @@ rx_lo = np.array([0, 1])  # used LO
 
 # phase noise definition
 L_freqs_vec = np.array([10, 100e3, 300e3, 5000e3, 1e8]) #/ 2
-L_dB_vec = np.array([-65, -65, -85, -115, -115]) - 6 # * 10
+L_dB_vec = np.array([-65, -65, -85, -115, -115])
 # L_freqs_vec = np.array([10, 100e3, 1e6, 10e6, 1e8]) #/ 2
 # L_dB_vec = np.array([-90, -90, -110, -110, -130]) # * 10
 
@@ -141,11 +144,14 @@ radar_simulated = skradar.FMCWRadar(
     lo_spec=lo_error_spec,
     tx_lo=tx_lo,
     rx_lo=rx_lo,
-    tx_ant_gains=np.array([15, 15]),#, 15
-    rx_ant_gains=np.array([10, 10]),
+    win_range='hann',
+    win_doppler='hann',
+    tx_ant_gains=np.array([15,15]),#, 15
+    rx_ant_gains=np.array([10,10]),
     pos=radar_pos,
     name="First radar",
-    if_real=True,
+    if_real=False,
+    coherent_pn=True    # for comparsion with measurement where no phase noise is added in simulation
 )
 
 # copy to store and process measurement data in parallel
@@ -167,21 +173,21 @@ else:
     print("Invalid measurement data shape")
 
 # apply errors
-#radar_simulated.apply_errors_bpsk()
-#radar_measured.apply_errors_bpsk()
+radar_simulated.apply_errors_bpsk()
+radar_measured.apply_errors_bpsk()
 
-#radar_simulated.extract_mimo()
-#radar_measured.extract_mimo()
+radar_simulated.extract_mimo()
+radar_measured.extract_mimo()
 #radar_simulated.apply_errors_unmerged()
 #radar_measured.apply_errors_unmerged()
 
 # processing
 radar_simulated.range_compression(zp_fact=zp_fact_range)
-radar_simulated.doppler_processing(zp_fact=zp_fact_doppler, win_doppler="hann")
+radar_simulated.doppler_processing(zp_fact=zp_fact_doppler)
 rp_simulated_noisy_scaled = 1 / (np.sqrt(2)) * radar_simulated.rp_noisy
 rp_simulated_scaled = 1 / (np.sqrt(2)) * radar_simulated.rp
 radar_measured.range_compression(zp_fact=zp_fact_range)
-radar_measured.doppler_processing(zp_fact=zp_fact_doppler, win_doppler="hann")
+radar_measured.doppler_processing(zp_fact=zp_fact_doppler)
 
 if single_chirp_analysis:
     rp_simulated_noisy_abs_chirp_mean = np.abs(rp_simulated_noisy_scaled)[:,:,chirp_idx]
@@ -214,6 +220,7 @@ rp_measured_noisy_plot_dB = 20 * np.log10(rp_measured_noisy_abs_chirp_mean)[:,:,
 rp_measured_plot_dB = 20 * np.log10(rp_measured_abs_chirp_mean)[:,:,: len(radar_simulated.ranges) // 2]
 
 fig_rp, (ax_rp_noisy_simulated, ax_rp_noisy_measured) = plt.subplots(2,1,num="range_profiles",figsize=[8,6],layout="compressed")
+fig_rp_sim, ax_rp_noisy_sim = plt.subplots(1,1,num="range_profile_sim",figsize=[8,4],layout="compressed")
 for tx_idx in range(rp_simulated_noisy_scaled.shape[0]):
     for rx_idx in range(rp_simulated_noisy_scaled.shape[1]):
         
@@ -228,44 +235,68 @@ for tx_idx in range(rp_simulated_noisy_scaled.shape[0]):
         highest_peak_indices_measured = peak_indices_measured[np.argsort(peak_heights_measured)[-nr_of_targets:]]
 
         # plot
+        if rp_simulated_noisy_scaled.shape[0] == 1:
+            label = f"rx{rx_idx}"
+        else:
+            label = f"tx{tx_idx}, rx{rx_idx}"
         ax_rp_noisy_simulated.plot(
-            target_dists_plot, rp_simulated_noisy_plot_dB[tx_idx, rx_idx]- np.max(rp_simulated_noisy_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_simulated_noisy_plot_dB[tx_idx, rx_idx]- np.max(rp_simulated_noisy_plot_dB), label=label
         )
         ax_rp_noisy_simulated.plot(
-            target_dists_plot[highest_peak_indices_simulated], rp_simulated_noisy_plot_dB[tx_idx,rx_idx][highest_peak_indices_simulated] - np.max(rp_simulated_noisy_plot_dB), "x"
+            target_dists_plot[highest_peak_indices_simulated], rp_simulated_noisy_plot_dB[tx_idx,rx_idx][highest_peak_indices_simulated] - np.max(rp_simulated_noisy_plot_dB), "xk"
         )
         ax_rp_noisy_measured.plot(
-            target_dists_plot, rp_measured_noisy_plot_dB[tx_idx,rx_idx] - np.max(rp_measured_noisy_plot_dB), label=f"tx{tx_idx}, rx{rx_idx}"
+            target_dists_plot, rp_measured_noisy_plot_dB[tx_idx,rx_idx] - np.max(rp_measured_noisy_plot_dB), label=label
         )
         ax_rp_noisy_measured.plot(
-            target_dists_plot[highest_peak_indices_measured], rp_measured_noisy_plot_dB[tx_idx,rx_idx][highest_peak_indices_measured] - np.max(rp_measured_noisy_plot_dB), "x"
+            target_dists_plot[highest_peak_indices_measured], rp_measured_noisy_plot_dB[tx_idx,rx_idx][highest_peak_indices_measured] - np.max(rp_measured_noisy_plot_dB), "xk"
+        )
+
+        ax_rp_noisy_sim.plot(
+            target_dists_plot, rp_simulated_noisy_plot_dB[tx_idx, rx_idx]- np.max(rp_simulated_noisy_plot_dB), label=label
+        )
+        ax_rp_noisy_sim.plot(
+            target_dists_plot[highest_peak_indices_simulated], rp_simulated_noisy_plot_dB[tx_idx,rx_idx][highest_peak_indices_simulated] - np.max(rp_simulated_noisy_plot_dB), "xk"
         )
 
 np.save("error", np.append(target_dists_plot, rp_simulated_noisy_plot_dB))
 
-ax_rp_noisy_simulated.legend()
+ax_rp_noisy_simulated.legend(loc='upper right')
 ax_rp_noisy_simulated.grid(True)
 ax_rp_noisy_simulated.set_title("Simulated")
 ax_rp_noisy_simulated.set_ylabel("Normalized Power (dB)")
 ax_rp_noisy_simulated.set_xlim([0,target_dists_plot[-1]/range_zoom])
-ax_rp_noisy_measured.legend()
+ax_rp_noisy_measured.legend(loc='upper right')
 ax_rp_noisy_measured.grid(True)
 ax_rp_noisy_measured.set_title("Measured")
 ax_rp_noisy_measured.set_ylabel("Normalized Power (dB)")
 ax_rp_noisy_measured.set_xlim([0,target_dists_plot[-1]/range_zoom])
 
+ax_rp_noisy_sim.legend(loc='upper right')
+ax_rp_noisy_sim.grid(True)
+ax_rp_noisy_sim.set_title("Simulated")
+ax_rp_noisy_sim.set_ylabel("Normalized Power (dB)")
+ax_rp_noisy_sim.set_xlim([0,target_dists_plot[-1]/range_zoom])
+
 if axis_frequency:
     ax_rp_noisy_simulated.set_xlabel("Frequency (MHz)")
+    ax_rp_noisy_sim.set_xlabel("Frequency (MHz)")
     ax_rp_noisy_measured.set_xlabel("Frequency (MHz)")
 else:
     ax_rp_noisy_simulated.set_xlabel("Range (m)")
+    ax_rp_noisy_sim.set_xlabel("Range (m)")
     ax_rp_noisy_measured.set_xlabel("Range (m)")
 
-plt.savefig("range_profiles.eps",
+plt.savefig("range_profile_sim.eps",
             papertype = 'a4',
             bbox_inches = 'tight'
             )
 
+plt.figure("range_profiles")
+plt.savefig("range_profiles.eps",
+            papertype = 'a4',
+            bbox_inches = 'tight'
+            )
 plt.show()
 
 plt.figure("rd_map_simulated")

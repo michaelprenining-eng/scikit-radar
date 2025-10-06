@@ -337,8 +337,11 @@ class Radar(Thing, ABC):
 
     def extract_mimo(self):
 
+        win_dopp = scipy.signal.windows.get_window('hann', self.s_if_noisy.shape[2])
+        win_coh_gain = np.sum(win_dopp) / self.s_if_noisy.shape[2]
+        win_scaled = win_dopp*win_coh_gain
         # 1. transform to frequency domain (slow time frequency)
-        doppler_fft = np.fft.fft(self.s_if_noisy,n=2*self.s_if_noisy.shape[2], axis=2)
+        doppler_fft = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=2*self.s_if_noisy.shape[2], axis=2)
 
         # 2. separate into multiple slow-time frequency bands
         doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
@@ -472,7 +475,6 @@ class Radar(Thing, ABC):
     def doppler_processing(
         self,
         zp_fact: float = 1,
-        win_doppler: str = "boxcar",
         process_noisy: bool = True,
     ):
         """
@@ -488,21 +490,22 @@ class Radar(Thing, ABC):
             Determines if both noiseless and noisy signals are processed. Default: true
 
         """
+        win = self.win_doppler
         if self.rp is None:
             raise TypeError("rp is None. It has to be calculated first")
         else:
             if self.N_s > 1:
-                win = scipy.signal.windows.get_window(win_doppler, self.N_s)
+                #win = scipy.signal.windows.get_window(win_doppler, self.N_s)
                 win = win[np.newaxis, np.newaxis, :, np.newaxis]
                 z = 2 ** nextpow2(zp_fact * self.N_s)
-                self.rd = np.fft.fftshift(np.fft.fft(self.rp, n=z, axis=2), axes=2)
+                self.rd = np.fft.fftshift(np.fft.fft(self.rp*win, n=z, axis=2), axes=2)
                 if process_noisy:
                     if self.rp_noisy is None:
                         raise TypeError(
                             "rp_noisy is None. It has to be calculated first"
                         )
                     self.rd_noisy = np.fft.fftshift(
-                        np.fft.fft(self.rp_noisy, n=z, axis=2), axes=2
+                        np.fft.fft(self.rp_noisy*win, n=z, axis=2), axes=2
                     )
             else:
                 self.rd = self.rp
@@ -540,6 +543,7 @@ class FMCWRadar(Radar):
         win_range: str = "hann",
         win_doppler: str = "boxcar",
         if_real: bool = True,
+        coherent_pn:bool = False,
         **kwargs,
     ):
         self.B = B
@@ -553,6 +557,7 @@ class FMCWRadar(Radar):
         self.if_real = if_real
         self.s_if = None
         self.s_if_bursts = None
+        self.coherent_pn = coherent_pn
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         self.win_doppler = scipy.signal.windows.get_window(win_doppler, N_s)
         super().__init__(N_s=N_s, T_s=T_s, **kwargs)
@@ -624,7 +629,10 @@ class FMCWRadar(Radar):
             )
             for tx_cntr in range(self.M_tx):
                 phi_mod = self.tx_phase_mod[tx_cntr] * chirp_cntr
-                tx_lo_idx = self.tx_lo[0, tx_cntr].astype(int)
+                if self.coherent_pn:
+                    tx_lo_idx = 0
+                else:
+                    tx_lo_idx = self.tx_lo[0, tx_cntr].astype(int)
                 phi = np.hstack(
                     (
                         [0],
@@ -638,7 +646,10 @@ class FMCWRadar(Radar):
                 # plt.plot(t * 1e6, vekPN_LO, label=f"TX - LO {tx_lo_idx}")
                 # plt.xlabel("Time in us")
                 for rx_cntr in range(self.M_rx):
-                    rx_lo_idx = self.rx_lo[rx_cntr].astype(int)
+                    if self.coherent_pn:
+                        rx_lo_idx = 0
+                    else:
+                        rx_lo_idx = self.rx_lo[rx_cntr].astype(int)
                     for targ_cntr in range(self.N_targ):  # sum over targets
                         dist = dists[tx_cntr, rx_cntr, targ_cntr]
                         phi_shift = PN_phi_seed[rx_lo_idx] - 2 * np.pi * f_fft_SSB_vec[
@@ -748,12 +759,18 @@ class FMCWRadar(Radar):
             2 * np.pi * np.random.rand(self.M_tx, self.M_rx, self.N_s)
         )
 
+        win_dopp = self.win_doppler
+        win_coh_gain = np.sum(win_dopp) / self.s_if_noisy.shape[2]
+        win_scaled = win_dopp*win_coh_gain
+
         # 1. transform to frequency domain (slow time frequency)
-        doppler_fft = np.fft.fft(self.s_if_noisy,n=2*self.s_if_noisy.shape[2], axis=2)
+        doppler_fft = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=2*self.s_if_noisy.shape[2], axis=2)
 
         # 2. separate into multiple slow-time frequency bands
         doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
         doppler_bpsk = np.append(doppler_fft[:,:,:doppler_fft.shape[2]//4], doppler_fft[:,:,3*doppler_fft.shape[2]//4:], axis=2)
+        
+        #doppler_bpsk = np.append(doppler_fft[:,:,3*doppler_fft.shape[2]//4:],doppler_fft[:,:,:doppler_fft.shape[2]//4], axis=2)
         doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
 
         # 2. apply phase shifts
@@ -763,7 +780,7 @@ class FMCWRadar(Radar):
         time_domain = np.fft.ifft(doppler_erroneous, axis=2)
 
         # 4. add start phase error per chirp
-        time_domain_erroneous = time_domain# * np.exp(1j*start_phase)[:,:,:,None]
+        time_domain_erroneous = time_domain # np.exp(1j*start_phase)[:,:,:,None]
 
         self.s_if_noisy = np.sum(time_domain_erroneous, axis=0, keepdims=True)
 

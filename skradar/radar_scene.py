@@ -337,20 +337,30 @@ class Radar(Thing, ABC):
 
     def extract_mimo(self):
 
-        win_dopp = scipy.signal.windows.get_window('hann', self.s_if_noisy.shape[2])
-        win_coh_gain = np.sum(win_dopp) / self.s_if_noisy.shape[2]
-        win_scaled = win_dopp*win_coh_gain
-        # 1. transform to frequency domain (slow time frequency)
-        doppler_fft = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=2*self.s_if_noisy.shape[2], axis=2)
-
-        # 2. separate into multiple slow-time frequency bands
-        doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
-        doppler_bpsk = np.append(doppler_fft[:,:,:doppler_fft.shape[2]//4], doppler_fft[:,:,3*doppler_fft.shape[2]//4:], axis=2)
-        doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
+        # 1. separate signal into transmitters in doppler domain
+        doppler_tx_split = self.bpsk_split()
 
         # 2. transform to time domain
-        self.s_if_noisy = np.fft.ifft(doppler_tx_split, axis=2)
-        # raise NotImplementedError("Function not implemented yet")
+        self.s_if_noisy = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if_noisy.shape[2]]
+
+    def bpsk_split(self):
+
+        win_coh_gain = np.sum(self.win_doppler) / self.s_if_noisy.shape[2]
+        win_scaled = self.win_doppler*win_coh_gain
+
+        doppler_std = np.zeros_like(self.s_if_noisy, dtype=complex)
+        doppler_bpsk = np.zeros_like(self.s_if_noisy, dtype=complex)
+
+        # 1. transform to frequency domain (slow time frequency)*win_scaled[None,None,:,None]
+        doppler_fft = np.fft.fft(self.s_if_noisy,n=self.s_if_noisy.shape[2], axis=2)
+
+        # 2. separate into multiple slow-time frequency bands
+        doppler_std[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4] = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
+        doppler_bpsk[:,:,:doppler_fft.shape[2]//4] = doppler_fft[:,:,:doppler_fft.shape[2]//4]
+        doppler_bpsk[:,:,3*doppler_fft.shape[2]//4:] = doppler_fft[:,:,3*doppler_fft.shape[2]//4:]
+        doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
+
+        return doppler_tx_split
 
     def angle_proc_bp(
         self, ranges_bp: np.ndarray, angles_bp: np.ndarray, process_noisy: bool = True
@@ -619,6 +629,9 @@ class FMCWRadar(Radar):
         fs_PN = 2 / T_s_pn_ss  # stacking increases sampling frequency for PN
         N_PN = 2 * N_s_pn_ss  # stacking increases number of PN samples
 
+        # mimo merge for bspsk with exactly same phase starts cancels chirps
+        start_phase_offset = 2*np.pi*np.random.rand(self.M_tx)
+
         for chirp_cntr in range(self.N_s):
             dists, tx_dist, rx_dist = self.calc_dists(chirp_cntr * self.T_s)
             # # test plot
@@ -628,7 +641,7 @@ class FMCWRadar(Radar):
                 1 - 2 * np.random.rand(self.lo_spec.shape[1], int(N_PN / 2) - 1)
             )
             for tx_cntr in range(self.M_tx):
-                phi_mod = self.tx_phase_mod[tx_cntr] * chirp_cntr
+                phi_mod = start_phase_offset[tx_cntr] + self.tx_phase_mod[tx_cntr] * chirp_cntr
                 if self.coherent_pn:
                     tx_lo_idx = 0
                 else:
@@ -759,28 +772,20 @@ class FMCWRadar(Radar):
             2 * np.pi * np.random.rand(self.M_tx, self.M_rx, self.N_s)
         )
 
-        win_dopp = self.win_doppler
-        win_coh_gain = np.sum(win_dopp) / self.s_if_noisy.shape[2]
-        win_scaled = win_dopp*win_coh_gain
-
-        # 1. transform to frequency domain (slow time frequency)
-        doppler_fft = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=2*self.s_if_noisy.shape[2], axis=2)
-
-        # 2. separate into multiple slow-time frequency bands
-        doppler_std = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
-        doppler_bpsk = np.append(doppler_fft[:,:,:doppler_fft.shape[2]//4], doppler_fft[:,:,3*doppler_fft.shape[2]//4:], axis=2)
-        
         #doppler_bpsk = np.append(doppler_fft[:,:,3*doppler_fft.shape[2]//4:],doppler_fft[:,:,:doppler_fft.shape[2]//4], axis=2)
-        doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
+        doppler_tx_split = self.bpsk_split()
 
         # 2. apply phase shifts
         doppler_erroneous = doppler_tx_split * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
 
         # 3. transform to time domain
-        time_domain = np.fft.ifft(doppler_erroneous, axis=2)
+        time_domain_erroneous = np.fft.ifft(doppler_erroneous, axis=2)
 
-        # 4. add start phase error per chirp
-        time_domain_erroneous = time_domain # np.exp(1j*start_phase)[:,:,:,None]
+        # # 4. add start phase error per chirp
+        # if self.if_real:
+        #     time_domain_erroneous = time_domain_erroneous * np.cos(start_phase)[:,:,:,None]
+        # else:
+        #     time_domain_erroneous = time_domain_erroneous * np.exp(1j*start_phase)[:,:,:,None]
 
         self.s_if_noisy = np.sum(time_domain_erroneous, axis=0, keepdims=True)
 

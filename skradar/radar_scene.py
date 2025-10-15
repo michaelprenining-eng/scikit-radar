@@ -333,34 +333,122 @@ class Radar(Thing, ABC):
     def merge_mimo(self):
         self.s_if = np.sum(self.s_if, axis=0, keepdims=True)
         self.s_if_noisy = np.sum(self.s_if_noisy, axis=0, keepdims=True)
-        # raise NotImplementedError("Function not implemented yet")
 
     def extract_mimo(self):
 
-        # 1. separate signal into transmitters in doppler domain
-        doppler_tx_split = self.bpsk_split()
+        # split for 2Tx bpsk
+        doppler_tx_split, doppler_tx_split_noisy = self.bpsk_split()
 
-        # 2. transform to time domain
-        self.s_if_noisy = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if_noisy.shape[2]]
+        self.s_if = doppler_tx_split
+        self.s_if_noisy = doppler_tx_split_noisy
 
     def bpsk_split(self):
 
         win_coh_gain = np.sum(self.win_doppler) / self.s_if_noisy.shape[2]
         win_scaled = self.win_doppler*win_coh_gain
 
-        doppler_std = np.zeros_like(self.s_if_noisy, dtype=complex)
-        doppler_bpsk = np.zeros_like(self.s_if_noisy, dtype=complex)
+        doppler_std_noisy = np.zeros_like(self.s_if_noisy, dtype=complex)
+        doppler_bpsk_noisy = np.zeros_like(self.s_if_noisy, dtype=complex)
+        doppler_std = np.zeros_like(self.s_if, dtype=complex)
+        doppler_bpsk = np.zeros_like(self.s_if, dtype=complex)
 
         # 1. transform to frequency domain (slow time frequency)*win_scaled[None,None,:,None]
-        doppler_fft = np.fft.fft(self.s_if_noisy,n=self.s_if_noisy.shape[2], axis=2)
+        doppler_fft = np.fft.fft(self.s_if*win_scaled[None,None,:,None],n=self.s_if.shape[2], axis=2)
+        doppler_fft_noisy = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=self.s_if_noisy.shape[2], axis=2)
 
         # 2. separate into multiple slow-time frequency bands
         doppler_std[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4] = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
         doppler_bpsk[:,:,:doppler_fft.shape[2]//4] = doppler_fft[:,:,:doppler_fft.shape[2]//4]
         doppler_bpsk[:,:,3*doppler_fft.shape[2]//4:] = doppler_fft[:,:,3*doppler_fft.shape[2]//4:]
         doppler_tx_split = np.vstack((doppler_bpsk,doppler_std))
+        doppler_std_noisy[:,:,doppler_fft_noisy.shape[2]//4:3*doppler_fft_noisy.shape[2]//4] = doppler_fft_noisy[:,:,doppler_fft_noisy.shape[2]//4:3*doppler_fft_noisy.shape[2]//4]
+        doppler_bpsk_noisy[:,:,:doppler_fft_noisy.shape[2]//4] = doppler_fft_noisy[:,:,:doppler_fft_noisy.shape[2]//4]
+        doppler_bpsk_noisy[:,:,3*doppler_fft_noisy.shape[2]//4:] = doppler_fft_noisy[:,:,3*doppler_fft_noisy.shape[2]//4:]
+        doppler_tx_split_noisy = np.vstack((doppler_bpsk_noisy,doppler_std_noisy))
 
-        return doppler_tx_split
+        # 3. transform to time domain
+        doppler_tx_split = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if.shape[2]]
+        doppler_tx_split_noisy = np.fft.ifft(doppler_tx_split_noisy, axis=2)[:,:,:self.s_if_noisy.shape[2]]
+
+        # 4. make sure that signal is real
+        if self.if_real:
+            doppler_tx_split = np.real(doppler_tx_split)
+            doppler_tx_split_noisy = np.real(doppler_tx_split_noisy)
+
+        return doppler_tx_split, doppler_tx_split_noisy
+    
+    def chirp_transform(self, f_0, f_1, M:int=128,block_size:int=32,win="boxcar"):
+
+        blocks_per_chirp = 2 * self.s_if.shape[-1] // block_size - 1
+        hop = block_size // 2
+
+        # signal properties
+        N = block_size # self.s_if.shape[-1]
+        f_s = 1 / self.T_f
+
+        # Exponential factor
+        omega_0 = 2 * np.pi * f_0 / f_s
+        omega_1 = 2 * np.pi * f_1 / f_s
+        delta_omega = (omega_1 - omega_0) / M
+        W = np.exp(-1j * delta_omega)
+
+        # h_1 computation
+        n_h = np.arange(M + N - 1) 
+        h_1 = W ** (-(n_h - N + 1) ** 2 / 2)
+
+        # m_1 computation
+        n_m1 = np.arange(N)
+        m_1 = np.exp(-1j * omega_0 * n_m1) * W ** (n_m1 ** 2 / 2)
+
+        # m_2 computation
+        n_m2 = np.arange(N - 1, M + N - 1)
+        m_2 = np.zeros(M + N - 1, dtype=complex)  # To store complex values
+        m_2[N - 1:] = W ** ((n_m2 - N + 1) ** 2 / 2)
+
+        if self.if_real:
+            to_transformation = scipy.signal.hilbert(self.s_if)
+            to_transformation_noisy = scipy.signal.hilbert(self.s_if_noisy)
+        else:
+            to_transformation = self.s_if
+            to_transformation_noisy = self.s_if_noisy
+
+        win_transform = scipy.signal.windows.get_window(win, block_size)
+        win_coh_gain = np.sum(win_transform) / block_size
+        win_scaled = win_transform*win_coh_gain
+
+        conv_res = np.zeros((self.s_if.shape[0],self.s_if.shape[1],self.s_if.shape[2],blocks_per_chirp,m_2.shape[0]),dtype=complex)
+        conv_res_noisy = np.zeros((self.s_if_noisy.shape[0],self.s_if_noisy.shape[1],self.s_if_noisy.shape[2],blocks_per_chirp,m_2.shape[0]),dtype=complex)
+        for tx_idx in range(self.s_if_noisy.shape[0]):
+            for rx_idx in range(self.s_if_noisy.shape[1]):
+                for chirp_idx in range(self.s_if_noisy.shape[2]):
+                    for block_idx in range(blocks_per_chirp):
+
+                        block_data = to_transformation[tx_idx,rx_idx,chirp_idx,block_idx*hop:block_idx*hop+block_size]*win_scaled
+                        block_data_noisy = to_transformation_noisy[tx_idx,rx_idx,chirp_idx,block_idx*hop:block_idx*hop+block_size]*win_scaled
+
+                        to_conv = block_data * m_1
+                        to_conv_noisy = block_data_noisy * m_1
+                        conv_res_real = np.convolve(np.real(h_1), np.real(to_conv))[:M + N - 1]
+                        conv_res_imag = np.convolve(np.imag(h_1), np.imag(to_conv))[:M + N - 1]
+                        conv_res_h1_imag = np.convolve(np.imag(h_1), np.real(to_conv))[:M + N - 1]
+                        conv_res_h1_real = np.convolve(np.real(h_1), np.imag(to_conv))[:M + N - 1]
+                        conv_res[tx_idx,rx_idx,chirp_idx,block_idx] = ((conv_res_real - conv_res_imag) + 1j * (conv_res_h1_imag + conv_res_h1_real)) * m_2
+                        conv_res_noisy_real = np.convolve(np.real(h_1), np.real(to_conv_noisy))[:M + N - 1]
+                        conv_res_noisy_imag = np.convolve(np.imag(h_1), np.imag(to_conv_noisy))[:M + N - 1]
+                        conv_res_noisy_h1_imag = np.convolve(np.imag(h_1), np.real(to_conv_noisy))[:M + N - 1]
+                        conv_res_noisy_h1_real = np.convolve(np.real(h_1), np.imag(to_conv_noisy))[:M + N - 1]
+                        conv_res_noisy[tx_idx,rx_idx,chirp_idx,block_idx] = ((conv_res_noisy_real - conv_res_noisy_imag) + 1j * (conv_res_noisy_h1_imag + conv_res_noisy_h1_real)) * m_2
+                    
+        y_3 = conv_res[:,:,:,:,N - 1:N - 1 + M]
+        y_3 = y_3 / np.max(np.abs(y_3), axis = -1)[:,:,:,:,None]
+        y_3_noisy = conv_res_noisy[:,:,:,:,N - 1:N - 1 + M]
+        y_3_noisy = y_3_noisy / np.max(np.abs(y_3_noisy), axis = -1)[:,:,:,:,None]
+
+        # Frequency vector
+        omegas = np.arange(M) * delta_omega + omega_0
+        omegas = omegas * f_s / (2 * np.pi)
+
+        return blocks_per_chirp, y_3, y_3_noisy
 
     def angle_proc_bp(
         self, ranges_bp: np.ndarray, angles_bp: np.ndarray, process_noisy: bool = True
@@ -767,27 +855,23 @@ class FMCWRadar(Radar):
             * t[None,None,:]**2
         )
 
-        # phase error due to chirp start phase
-        start_phase = (
-            2 * np.pi * np.random.rand(self.M_tx, self.M_rx, self.N_s)
-        )
+        # # phase error due to chirp start phase
+        # start_phase = (
+        #     2 * np.pi * np.random.rand(self.M_tx, self.M_rx, self.N_s)
+        # )
 
-        #doppler_bpsk = np.append(doppler_fft[:,:,3*doppler_fft.shape[2]//4:],doppler_fft[:,:,:doppler_fft.shape[2]//4], axis=2)
-        doppler_tx_split = self.bpsk_split()
+        self.extract_mimo()
 
-        # 2. apply phase shifts
-        doppler_erroneous = doppler_tx_split * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+        if self.if_real:
+            hilbert_transformed = scipy.signal.hilbert(self.s_if)
+            self.s_if = np.real(hilbert_transformed * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:])
+            hilbert_transformed_noisy = scipy.signal.hilbert(self.s_if_noisy)
+            self.s_if_noisy = np.real(hilbert_transformed_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:])
+        else:
+            self.s_if = self.s_if * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
+            self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
 
-        # 3. transform to time domain
-        time_domain_erroneous = np.fft.ifft(doppler_erroneous, axis=2)
-
-        # # 4. add start phase error per chirp
-        # if self.if_real:
-        #     time_domain_erroneous = time_domain_erroneous * np.cos(start_phase)[:,:,:,None]
-        # else:
-        #     time_domain_erroneous = time_domain_erroneous * np.exp(1j*start_phase)[:,:,:,None]
-
-        self.s_if_noisy = np.sum(time_domain_erroneous, axis=0, keepdims=True)
+        self.merge_mimo()
 
         
     def generate_AWGN(self):

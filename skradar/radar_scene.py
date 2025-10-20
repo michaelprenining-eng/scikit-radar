@@ -10,7 +10,6 @@ from skradar import range_compress_FMCW, sim_FMCW_if, backprojection
 from skradar import nextpow2, dBm2W, dB2lin
 import numpy as np
 import scipy.signal
-import scipy.spatial
 import matplotlib.pyplot as plt
 
 plt.ion()
@@ -337,26 +336,29 @@ class Radar(Thing, ABC):
     def extract_mimo(self):
 
         # split for 2Tx bpsk
-        doppler_tx_split, doppler_tx_split_noisy = self.bpsk_split()
+        if self.chirp_modulation == "bpsk":
+            doppler_tx_split, doppler_tx_split_noisy = self.bpsk_split()
+        elif self.chirp_modulation == "qpsk":
+            doppler_tx_split, doppler_tx_split_noisy = self.qpsk_split()
 
         self.s_if = doppler_tx_split
         self.s_if_noisy = doppler_tx_split_noisy
 
     def bpsk_split(self):
-
-        win_coh_gain = np.sum(self.win_doppler) / self.s_if_noisy.shape[2]
-        win_scaled = self.win_doppler*win_coh_gain
+        
+        # hamming window to not discard chirps on the edges
+        win = scipy.signal.windows.get_window("hamming",self.s_if.shape[-2]) 
 
         doppler_std_noisy = np.zeros_like(self.s_if_noisy, dtype=complex)
         doppler_bpsk_noisy = np.zeros_like(self.s_if_noisy, dtype=complex)
         doppler_std = np.zeros_like(self.s_if, dtype=complex)
         doppler_bpsk = np.zeros_like(self.s_if, dtype=complex)
 
-        # 1. transform to frequency domain (slow time frequency)*win_scaled[None,None,:,None]
-        doppler_fft = np.fft.fft(self.s_if*win_scaled[None,None,:,None],n=self.s_if.shape[2], axis=2)
-        doppler_fft_noisy = np.fft.fft(self.s_if_noisy*win_scaled[None,None,:,None],n=self.s_if_noisy.shape[2], axis=2)
+        # 1. transform to frequency domain (slow time frequency)
+        doppler_fft = np.fft.fft(self.s_if*win[None,None,:,None],n=self.s_if.shape[2], axis=2)
+        doppler_fft_noisy = np.fft.fft(self.s_if_noisy*win[None,None,:,None],n=self.s_if_noisy.shape[2], axis=2)
 
-        # 2. separate into multiple slow-time frequency bands
+        # 2. separate into multiple slow-time frequency bands (psk-order dependent)
         doppler_std[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4] = doppler_fft[:,:,doppler_fft.shape[2]//4:3*doppler_fft.shape[2]//4]
         doppler_bpsk[:,:,:doppler_fft.shape[2]//4] = doppler_fft[:,:,:doppler_fft.shape[2]//4]
         doppler_bpsk[:,:,3*doppler_fft.shape[2]//4:] = doppler_fft[:,:,3*doppler_fft.shape[2]//4:]
@@ -367,8 +369,53 @@ class Radar(Thing, ABC):
         doppler_tx_split_noisy = np.vstack((doppler_bpsk_noisy,doppler_std_noisy))
 
         # 3. transform to time domain
-        doppler_tx_split = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if.shape[2]]
-        doppler_tx_split_noisy = np.fft.ifft(doppler_tx_split_noisy, axis=2)[:,:,:self.s_if_noisy.shape[2]]
+        doppler_tx_split = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if.shape[2]]/win[None,None,:,None]
+        doppler_tx_split_noisy = np.fft.ifft(doppler_tx_split_noisy, axis=2)[:,:,:self.s_if_noisy.shape[2]]/win[None,None,:,None]
+
+        # 4. make sure that signal is real
+        if self.if_real:
+            doppler_tx_split = np.real(doppler_tx_split)
+            doppler_tx_split_noisy = np.real(doppler_tx_split_noisy)
+
+        return doppler_tx_split, doppler_tx_split_noisy
+    
+    def qpsk_split(self):
+        
+        # hamming window to not discard chirps on the edges
+        win = scipy.signal.windows.get_window("hamming",self.s_if.shape[-2]) 
+
+        doppler_tx0 = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx1 = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx2 = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx3 = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx0_noisy = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx1_noisy = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx2_noisy = np.zeros_like(self.s_if, dtype=complex)
+        doppler_tx3_noisy = np.zeros_like(self.s_if, dtype=complex)
+
+        # 1. transform to frequency domain (slow time frequency)
+        doppler_fft = np.fft.fft(self.s_if*win[None,None,:,None],n=self.s_if.shape[2], axis=2)
+        doppler_fft_noisy = np.fft.fft(self.s_if_noisy*win[None,None,:,None],n=self.s_if_noisy.shape[2], axis=2)
+
+        # 2. separate into multiple slow-time frequency bands (psk-order dependent)
+        nr_of_doppler_bins = doppler_fft.shape[2]
+        doppler_tx0[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8] = doppler_fft[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8]
+        doppler_tx1[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8] = doppler_fft[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8]
+        doppler_tx2[:,:,7*nr_of_doppler_bins//8:] = doppler_fft[:,:,7*nr_of_doppler_bins//8:]
+        doppler_tx2[:,:,:nr_of_doppler_bins//8] = doppler_fft[:,:,:nr_of_doppler_bins//8]
+        doppler_tx1[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
+        doppler_tx_split = np.vstack((doppler_tx0,doppler_tx1,doppler_tx2,doppler_tx3))
+
+        doppler_tx0_noisy[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8]
+        doppler_tx1_noisy[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8]
+        doppler_tx2_noisy[:,:,7*nr_of_doppler_bins//8:] = doppler_fft_noisy[:,:,7*nr_of_doppler_bins//8:]
+        doppler_tx2_noisy[:,:,:nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,:nr_of_doppler_bins//8]
+        doppler_tx1_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
+        doppler_tx_split_noisy = np.vstack((doppler_tx0_noisy,doppler_tx1_noisy,doppler_tx2_noisy,doppler_tx3_noisy))
+
+        # 3. transform to time domain
+        doppler_tx_split = np.fft.ifft(doppler_tx_split, axis=2)[:,:,:self.s_if.shape[2]]/win[None,None,:,None]
+        doppler_tx_split_noisy = np.fft.ifft(doppler_tx_split_noisy, axis=2)[:,:,:self.s_if_noisy.shape[2]]/win[None,None,:,None]
 
         # 4. make sure that signal is real
         if self.if_real:
@@ -443,10 +490,6 @@ class Radar(Thing, ABC):
         y_3 = y_3 / np.max(np.abs(y_3), axis = -1)[:,:,:,:,None]
         y_3_noisy = conv_res_noisy[:,:,:,:,N - 1:N - 1 + M]
         y_3_noisy = y_3_noisy / np.max(np.abs(y_3_noisy), axis = -1)[:,:,:,:,None]
-
-        # Frequency vector
-        omegas = np.arange(M) * delta_omega + omega_0
-        omegas = omegas * f_s / (2 * np.pi)
 
         return blocks_per_chirp, y_3, y_3_noisy
 
@@ -642,6 +685,7 @@ class FMCWRadar(Radar):
         win_doppler: str = "boxcar",
         if_real: bool = True,
         coherent_pn:bool = False,
+        chirp_modulation:str = "bpsk",
         **kwargs,
     ):
         self.B = B
@@ -658,6 +702,7 @@ class FMCWRadar(Radar):
         self.coherent_pn = coherent_pn
         self.win_range = scipy.signal.windows.get_window(win_range, N_f)
         self.win_doppler = scipy.signal.windows.get_window(win_doppler, N_s)
+        self.chirp_modulation = chirp_modulation
         super().__init__(N_s=N_s, T_s=T_s, **kwargs)
 
     def sim_chirps(self):

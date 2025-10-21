@@ -403,14 +403,14 @@ class Radar(Thing, ABC):
         doppler_tx1[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8] = doppler_fft[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8]
         doppler_tx2[:,:,7*nr_of_doppler_bins//8:] = doppler_fft[:,:,7*nr_of_doppler_bins//8:]
         doppler_tx2[:,:,:nr_of_doppler_bins//8] = doppler_fft[:,:,:nr_of_doppler_bins//8]
-        doppler_tx1[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
+        doppler_tx3[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
         doppler_tx_split = np.vstack((doppler_tx0,doppler_tx1,doppler_tx2,doppler_tx3))
 
         doppler_tx0_noisy[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,3*nr_of_doppler_bins//8:5*nr_of_doppler_bins//8]
         doppler_tx1_noisy[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,5*nr_of_doppler_bins//8:7*nr_of_doppler_bins//8]
         doppler_tx2_noisy[:,:,7*nr_of_doppler_bins//8:] = doppler_fft_noisy[:,:,7*nr_of_doppler_bins//8:]
         doppler_tx2_noisy[:,:,:nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,:nr_of_doppler_bins//8]
-        doppler_tx1_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
+        doppler_tx3_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8] = doppler_fft_noisy[:,:,nr_of_doppler_bins//8:3*nr_of_doppler_bins//8]
         doppler_tx_split_noisy = np.vstack((doppler_tx0_noisy,doppler_tx1_noisy,doppler_tx2_noisy,doppler_tx3_noisy))
 
         # 3. transform to time domain
@@ -881,7 +881,7 @@ class FMCWRadar(Radar):
         
         self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
 
-    def apply_errors_bpsk(self):
+    def apply_errors(self,merge:bool=True):
         # cross-check with apply_errors_unmerged() when modified
         t = np.linspace(0, self.N_f * self.T_f, self.N_f, endpoint=False)
 
@@ -916,7 +916,8 @@ class FMCWRadar(Radar):
             self.s_if = self.s_if * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
             self.s_if_noisy = self.s_if_noisy * np.exp(1j*(phase_course_f0_offset+phase_course_delta_B))[:,:,None,:]
 
-        self.merge_mimo()
+        if merge:
+            self.merge_mimo()
 
         
     def generate_AWGN(self):

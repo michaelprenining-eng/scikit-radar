@@ -38,16 +38,17 @@ np.random.seed(1)
 RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\bpsk_far_single_static_20251006_14-20-25_1.h5"
 
 # two nodes
-RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\qpsk_qmono_single_static_20251020_12-58-13_1.h5"
-#RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\qpsk_bistatic_293_tube_20251020_13-41-34_2.h5"
+# RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\qpsk_qmono_single_static_20251020_12-58-14_2.h5" # 3.83m nomally first module was used here
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\qpsk_qmono_single_static_20251020_12-58-13_1.h5" # 3.83m nomally first module was used here
+# RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\single_sensor\qpsk_bistatic_293_tube_20251020_13-41-34_2.h5"
 
 evaluate_measurement = True
-frame_idx =20 # 39 same range bin
+frame_idx =15#20 # 39 same range bin
 min_target_range = 1 # omit detection of leakage peak
 nr_of_targets = 1 # number of peak positions to detect
-range_zoom = 1#5
-axis_frequency = True  # show IF frequency on range profile
-calib_target_dist = 2.93 # 3.7 # 5.3 # used also for simulation
+range_zoom = 2#5
+axis_frequency = False  # show IF frequency on range profile
+calib_target_dist = 3.83 # 2.93 #  5.3 # used also for simulation
 calib_range_peak_tolerance = 2 # 0.5 # in m, depends on target position accuracy and expected frequency offsets
 second_target_dist = 20
 
@@ -89,7 +90,7 @@ with h5py.File(RADAR_FILENAME_HDF5_1, "r") as f:
     data = np.empty([NrChn, N_s, N_f])
 
     print(f"Loaded measurement with {int(f["Chn1"].shape[0]/N_s)} frames")
-
+    print(f"N_f = {N_f}, N_s = {N_s}")
     # get slow slow and fast time data for every channel of specified frame
     all_data = np.empty([int(f["Chn1"].shape[0]/N_s),NrChn, N_s, N_f])
     for Na in range(1,NrChn+1):
@@ -111,15 +112,16 @@ lambd = c0 / fc
 v_max = lambd / (4 * Ts_s)
 
 # simulated radar sensor (MIMO with 2x 1Tx-1Rx)
-tx_pos = np.array([[0, 0], [0, 0], [0, 0]])
+tx_pos = np.array([[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
 rx_pos = np.array([[0, 0], [0, 0], [0, 0]])
 radar_pos = np.array([[0], [0], [0]])
 
 # lo definitions
 lo_error_spec = np.array( 
-    [[0,0 * fs_f / 200], [0,0*10e-5 * B_sw]]
+    [[0,0 * fs_f / 200], [0,1*10e-5 * B_sw]]
 )  # specifications of available LOs (delta fc, delta B)
-
+print(f"fc = {fc*1e-9}GHz, B = {B_sw*1e-6}MHz")
+print(f"f error: {lo_error_spec[0]}, B error: {lo_error_spec[1]}")
 # four transmitter with qpsk
 tx_lo = np.array(
     [[0, 0, 0, 0], [0, np.pi/2, 2*np.pi/2, 3*np.pi/2]]
@@ -130,7 +132,7 @@ tx_lo = np.array(
 #     [[1, 0], [0, np.pi]]
 # )  # used LO and chirp modulation (lo idx, phase shift)
 
-rx_lo = np.array([0, 1])  # used LO
+rx_lo = np.array([1, 0])  # used LO
 
 f_diff = lo_error_spec[0,rx_lo][None,:] - lo_error_spec[0,tx_lo[0].astype("int")][:,None]
 B_diff = lo_error_spec[1,rx_lo][None,:] - lo_error_spec[1,tx_lo[0].astype("int")][:,None]
@@ -156,7 +158,7 @@ radar_simulated = skradar.FMCWRadar(
     rx_lo=rx_lo,
     win_range='hann',
     win_doppler='hann',
-    tx_ant_gains=np.array([15,15]),#, 15
+    tx_ant_gains=np.array([15,15,15,15]),#, 15
     rx_ant_gains=np.array([10,10]),
     pos=radar_pos,
     name="simulated radar",
@@ -193,12 +195,13 @@ radar_simulated.sim_chirps()
 radar_simulated.merge_mimo()
 
 # apply errors
-# radar_simulated.apply_errors_bpsk()
-# radar_measured.apply_errors_bpsk()
+radar_simulated.apply_errors(merge=False)
+radar_measured.apply_errors(merge=False)
+# TODO: check need for merging and ifft in apply_errors for speedup
 
 # extract mimio for tx dependent error estimation
-radar_simulated.extract_mimo()
-radar_measured.extract_mimo()
+# radar_simulated.extract_mimo()
+# radar_measured.extract_mimo()
 
 ############################################################################################################
 # per chirp frequency evaluation
@@ -216,20 +219,20 @@ chirp_transform_time = time.time() - start_time
 
 # frequency error estimation by comparing peak position of the range spectrum of a whole chirp with theoretical peak frequency for given target range
 if evaluate_measurement:
-    nn, chirp_transformed, chirp_transformed_noisy = radar_measured.chirp_transform(f_0,f_1,N_chirp_transform_bins,block_size=radar_measured.N_f,win="hann")
+    nn, whole_chirp_transformed, whole_chirp_transformed_noisy = radar_measured.chirp_transform(f_0,f_1,N_chirp_transform_bins,block_size=radar_measured.N_f,win="hann")
 else:
-    nn, chirp_transformed, chirp_transformed_noisy = radar_simulated.chirp_transform(f_0,f_1,N_chirp_transform_bins,block_size=radar_measured.N_f,win="hann")
+    nn, whole_chirp_transformed, whole_chirp_transformed_noisy = radar_simulated.chirp_transform(f_0,f_1,N_chirp_transform_bins,block_size=radar_measured.N_f,win="hann")
 
 transformed_abs = np.abs(transformed)
-chirp_transformed_abs = np.abs(chirp_transformed)
+whole_chirp_transformed_abs = np.abs(whole_chirp_transformed)
 transformed_noisy_abs = np.abs(transformed_noisy)
-chirp_transformed_noisy_abs = np.abs(chirp_transformed_noisy)
+whole_chirp_transformed_noisy_abs = np.abs(whole_chirp_transformed_noisy)
 
 # first and last look incorrect
-transformed_abs = transformed_abs[:,:,:,1:-1]
-chirp_transformed_abs = chirp_transformed_abs[:,:,:,0]
-transformed_noisy_abs = transformed_noisy_abs[:,:,:,1:-1]
-chirp_transformed_noisy_abs = chirp_transformed_noisy_abs[:,:,:,0]
+transformed_abs = transformed_abs[:,:,:,:]#1:-1]
+whole_chirp_transformed_abs = whole_chirp_transformed_abs[:,:,:,0]
+transformed_noisy_abs = transformed_noisy_abs[:,:,:,:]#1:-1]
+whole_chirp_transformed_noisy_abs = whole_chirp_transformed_noisy_abs[:,:,:,0]
 
 # bandwith error estimation
 chirp_transform_max_frequency = f_axis_chirp_transform[np.argmax(transformed_noisy_abs,axis=-1)]
@@ -238,10 +241,13 @@ chirp_transform_max_frequency_diff_mean = np.mean(chirp_transform_max_frequency_
 chirp_transform_delta_B = chirp_transform_max_frequency_diff_mean * (transformed_noisy.shape[-2] + 1)
 
 # frequency error estimation
-chirp_transform_delta_f = f_axis_chirp_transform[np.argmax(chirp_transformed_noisy_abs,axis=-1)] - (calib_target_freq + B_diff/2)[:,:,None] # chirp_transform_delta_B/2
+chirp_transform_delta_f = f_axis_chirp_transform[np.argmax(whole_chirp_transformed_noisy_abs,axis=-1)] - (calib_target_freq + B_diff/2)[:,:,None] # chirp_transform_delta_B/2
 
-chirp_transform_delta_B = chirp_transform_delta_B[:,:,chirp_idx]
-chirp_transform_delta_f = chirp_transform_delta_f[:,:,chirp_idx]
+
+
+
+
+
 
 
 # bandwidth error estimation with stft
@@ -360,7 +366,7 @@ calib_peak_search_idx = np.where(np.abs(target_dists - calib_target_dist) < cali
 min_peak_search_idx = np.where(target_dists >= min_target_range)[0][0]
 # find calibration target peak
 
-stft_result_abs = stft_result_abs[:,:,:,2:-2]
+stft_result_abs = stft_result_abs[:,:,:,1:-1]#2:-2]
 
 # calculate shift of maxima
 stft_result_abs = stft_result_abs / np.max(stft_result_abs[:,:,:,:,stft_calib_peak_search_idx], axis = -1)[:,:,:,:,None]
@@ -385,24 +391,31 @@ else:
 
 stft_delta_f = frequency_axis[peak_pos_idx] - (calib_target_freq + B_diff/2)[:,:,None]
 
-stft_delta_f = stft_delta_f[:,:,chirp_idx]
-stft_delta_B = stft_delta_B[:,:,chirp_idx]
+results = {
+    "chirp_transform_delta_B" : chirp_transform_delta_B,
+    "chirp_transform_delta_f" : chirp_transform_delta_f,
+    "stft_delta_B" : stft_delta_B,
+    "stft_delta_f" : stft_delta_f,
+    "calib_target_freq" : calib_target_freq,
+    "B_diff" : B_diff
+}
+np.save('result_dict.npy', results) 
 
 # print results
 print(f"Block processing: {blocks_per_chirp} blocks of size {block_size} per chirp.\n")
 print(f"chirp z transform range: f0 = {np.round(f_0*1e-6,2)}MHz, f1 = {np.round(f_1*1e-6,2)}MHz, Frequency bin size: {f_bin_size_chirp_transform*1e-3}kHz. Duration: {chirp_transform_time}s")
-print(f"STFT: Frequency bin size: {f_bin_size_stft*1e-3}kHz.  Duration: {chirp_transform_time}s")
+print(f"STFT: Frequency bin size: {f_bin_size_stft*1e-3}kHz.  Duration: {stft_transform_time}s")
 
 print(f"Applied B_diff error: \n{B_diff}")
-print(f"Estimated B_diff error with chirp transform: \n{chirp_transform_delta_B}\n")
-print(f"Error in % (chirp transform): \n{100*(chirp_transform_delta_B - B_diff)/B_diff}\n")
-print(f"Estimated B_diff error with stft: \n{stft_delta_B}\n")
-print(f"Error in % (stft): \n{100*(stft_delta_B - B_diff)/B_diff}\n")
+print(f"Estimated B_diff error with chirp transform: \n{chirp_transform_delta_B[:,:,chirp_idx]}\n")
+print(f"Error in % (chirp transform): \n{100*(chirp_transform_delta_B[:,:,chirp_idx] - B_diff)/B_diff}\n")
+print(f"Estimated B_diff error with stft: \n{stft_delta_B[:,:,chirp_idx]}\n")
+print(f"Error in % (stft): \n{100*(stft_delta_B[:,:,chirp_idx] - B_diff)/B_diff}\n")
 print(f"Applied f_diff error: \n{f_diff}")
-print(f"Estimated f_diff error with chirp transform: \n{chirp_transform_delta_f}")
-print(f"Error in % (chirp transform): \n{100*(chirp_transform_delta_f - f_diff)/f_diff}\n")
-print(f"Estimated f_diff error with fourier transform: \n{stft_delta_f}")
-print(f"Error in % (fourier transform): \n{100*(stft_delta_f - f_diff)/f_diff}\n")
+print(f"Estimated f_diff error with chirp transform: \n{chirp_transform_delta_f[:,:,chirp_idx]}")
+print(f"Error in % (chirp transform): \n{100*(chirp_transform_delta_f[:,:,chirp_idx] - f_diff)/f_diff}\n")
+print(f"Estimated f_diff error with fourier transform: \n{stft_delta_f[:,:,chirp_idx]}")
+print(f"Error in % (fourier transform): \n{100*(stft_delta_f[:,:,chirp_idx] - f_diff)/f_diff}\n")
 
 #################################################################################################################################################################
 # plots
@@ -416,12 +429,15 @@ chirp_trans_ax.legend()
 chirp_trans_ax.set_xlim([f_0,f_1])
 chirp_trans_ax.set_ylim([-110,10])
 chirp_trans_ax.set_xlabel('Frequency (Hz)')
-chirp_trans_ax.set_ylabel('Magnitude')
-chirp_trans_ax.set_title('Frequency Response')
+chirp_trans_ax.set_ylabel('Normalized Power (dB)')
+chirp_trans_ax.set_title('Blockwise Chirp z-Transformation')
 chirp_trans_ax.grid()
 chirp_trans_im.imshow(20*np.log(transformed_noisy_abs[0,0,chirp_idx]),aspect="auto",extent=[f_0,f_1,0,blocks_per_chirp],origin="lower")
 chirp_trans_im.set_xlabel("Frequency in Hz")
 chirp_trans_im.set_ylabel("Block idx")
+plt.savefig("chirp_transformed.pdf",
+            bbox_inches = 'tight'
+            )
 
 # stft result
 stft_fig, (stft_ax, stft_im) = plt.subplots(1,2,figsize=[10,4],num="stft")
@@ -432,13 +448,16 @@ stft_ax.legend()
 stft_ax.set_xlim([f_0,f_1])
 stft_ax.set_ylim([-110,10])
 stft_ax.set_xlabel('Frequency (Hz)')
-stft_ax.set_ylabel('Magnitude')
-stft_ax.set_title('Frequency Response')
+stft_ax.set_ylabel('Normalized Power (dB)')
+stft_ax.set_title('STFT')
 stft_ax.grid()
 stft_im.imshow(20*np.log(stft_result_abs[0,0,chirp_idx]),aspect="auto",extent=[0,1/(2*radar_simulated.T_f),0,blocks_per_chirp],origin="lower")
 stft_im.set_xlabel("Frequency in Hz")
 stft_im.set_ylabel("Block idx")
 # stft_im.set_xlim([f_0,f_1])
+plt.savefig("stft_transformed.pdf",
+            bbox_inches = 'tight'
+            )
 
 
 # range profile result
@@ -547,20 +566,24 @@ plt.savefig("range_profiles.eps",
             )
 plt.show()
 
-plt.figure("rd_map_simulated")
-plt.imshow(
+
+rd_fig, (rd_sim_ax, rd_meas_ax) = plt.subplots(1,2,figsize=[10,4],num="rd_maps")
+rd_sim_ax.imshow(
     20 * np.log(np.abs(radar_simulated.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])),
     aspect="auto",origin="lower",extent=[0,x_axis_plot[-1],-v_max,v_max]
 )
-plt.ylabel("v in m/s")
-plt.xlabel("range in m")
-
-plt.figure("rd_map_measured")
-plt.imshow(
+rd_sim_ax.set_ylabel("v in m/s")
+rd_sim_ax.set_xlabel("range in m")
+rd_sim_ax.set_title("Simulation")
+rd_meas_ax.imshow(
     20 * np.log(np.abs(radar_measured.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])),
     aspect="auto",origin="lower",extent=[0,x_axis_plot[-1],-v_max,v_max]
 )
-plt.ylabel("v in m/s")
-plt.xlabel("range in m")
+rd_meas_ax.set_ylabel("v in m/s")
+rd_meas_ax.set_xlabel("range in m")
+rd_meas_ax.set_title("Measurement")
 
+plt.savefig("rd_maps.pdf",
+            bbox_inches = 'tight'
+            )
 plt.show()

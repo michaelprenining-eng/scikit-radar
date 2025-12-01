@@ -1,9 +1,11 @@
 import skradar
 import numpy as np
-import scipy
+import scipy as sp
+from scipy.ndimage import maximum_filter
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
+from skradar.detection import cfar
 
 # plt.rcParams['text.latex.preamble']=r"\usepackage{lmodern}"
 # params = {'text.usetex' : True,
@@ -15,6 +17,140 @@ from matplotlib.colors import Normalize
 from scipy.constants import speed_of_light as c0
 
 FIGURE_WIDTH = 5.3
+
+
+def os_cfar_2d(rd_map, guard_cells, training_cells, rank, threshold_factor):
+    """
+    Perform 2D Ordered Statistics CFAR on a range-Doppler map.
+    
+    Args:
+        rd_map (np.ndarray): Range-Doppler map (2D matrix).
+        guard_cells (int): Number of guard cells around the CUT (Cell Under Test).
+        training_cells (int): Number of training cells around the guard cells.
+        rank (int): Rank to pick for ordered statistics (used for noise estimation).
+        threshold_factor (float): Scaling factor for the detection threshold.
+
+    Returns:
+        np.ndarray: Binary mask of detected target locations.
+    """
+    rows, cols = rd_map.shape
+    total_training_cells = (2 * training_cells + 1) ** 2 - (2 * guard_cells + 1) ** 2
+    
+    # Initialize CFAR result and padding for edge calculation
+    cfar_map = np.zeros_like(rd_map)
+    padded_map = np.pad(rd_map, pad_width=training_cells + guard_cells, mode='constant')
+    
+    # Sliding window approach
+    for r in range(rows):
+        for c in range(cols):
+            # Extract window
+            r_start = r
+            r_end = r + 2 * (training_cells + guard_cells) + 1
+            c_start = c
+            c_end = c + 2 * (training_cells + guard_cells) + 1
+            window = padded_map[r_start:r_end, c_start:c_end]
+            
+            # Exclude guard cells and CUT
+            cut_start = training_cells
+            cut_end = training_cells + 2 * guard_cells + 1
+            cut_window = window[cut_start:cut_end, cut_start:cut_end]
+            noise_training_cells = np.delete(window.flatten(), 
+                                             np.arange(cut_start * window.shape[0] + cut_start, 
+                                                       cut_end * window.shape[1] + cut_end))
+            
+            # Ordered Statistics CFAR: Select the k-th largest training value
+            noise_estimate = np.sort(noise_training_cells)[-int(noise_training_cells.shape[0]*rank)]
+            
+            # Calculate threshold
+            threshold = noise_estimate * threshold_factor
+            
+            # Compare the CUT with the threshold
+            if rd_map[r, c] > threshold:
+                cfar_map[r, c] = 1
+    
+    return cfar_map
+
+def find_peaks_2d(cfar_map, rd_map, window_size):
+    """
+    Perform peak detection on a range-Doppler map after CFAR.
+    
+    Args:
+        cfar_map (np.ndarray): Binary CFAR output map.
+        rd_map (np.ndarray): Original range-Doppler map.
+        window_size (int): Window size for local peak detection (should be odd).
+    
+    Returns:
+        list: List of detected peak locations [(row, col), ...].
+    """
+    # Local maxima search
+    local_max = maximum_filter(rd_map, size=window_size) == rd_map
+    peaks_binary = local_max & (cfar_map > 0)
+    peak_indices = np.argwhere(peaks_binary)
+    
+    return peak_indices
+
+def detect_target_and_spurs(rd_map, debug_plot:bool=False):
+    rd_map = np.concatenate((rd_map[:,-1,:][:,None,:],rd_map,rd_map[:,0,:][:,None,:]),axis=1)
+    rd_map_vdim_mean = np.mean(np.abs(rd_map[:,:,:rd_map.shape[-1]//2]),(0,-2))
+
+    cfarConfig_ft = cfar.CFARConfig(train_cells=20, guard_cells=10,
+                                               pfa=1e-2, mode=cfar.CFARMode.CA)
+    cfar_threshold_rp = cfar.cfar_threshold(rd_map_vdim_mean,cfarConfig_ft)
+    mask = rd_map_vdim_mean>cfar_threshold_rp
+    idx_array = np.arange(rd_map_vdim_mean.shape[0])[mask]
+    max_idx_rp = idx_array[sp.signal.find_peaks(rd_map_vdim_mean[mask])[0][0]]
+    
+    # rd_v_slice = np.concatenate((rd_map[:,:,max_idx_rp],rd_map[:,:,max_idx_rp]),axis=1)
+    rd_v_slice = rd_map[:,:,max_idx_rp]
+
+    rd_v_slice_abs = np.mean(np.abs(rd_v_slice),axis=0)
+    cfarConfig_st = cfar.CFARConfig(train_cells=25, guard_cells=10,
+                                               pfa=1e-4, mode=cfar.CFARMode.CA)
+    cfar_threshold_vp = cfar.cfar_threshold(rd_v_slice_abs,cfarConfig_st)
+    mask = rd_v_slice_abs>cfar_threshold_vp
+    idx_array = np.arange(rd_v_slice_abs.shape[0])[mask]
+    peak_idx_vp = idx_array[sp.signal.find_peaks(rd_v_slice_abs[mask])[0]]
+    
+    # first idx should be peak, not spur
+    target_peak = np.argmax(rd_v_slice_abs[peak_idx_vp])
+    peak_spur_idx = np.hstack((peak_idx_vp[target_peak:], peak_idx_vp[:target_peak]))
+    
+    to_ifft = rd_v_slice[:,peak_spur_idx]/np.abs(rd_v_slice[:,peak_idx_vp])[:,target_peak,None]
+    
+    angle_result = np.angle(np.fft.ifft(to_ifft,axis=1))
+    print((angle_result-angle_result[:,0,None])*180/np.pi)
+    print(np.mean((angle_result-angle_result[:,0,None]),0)*180/np.pi)
+
+    if debug_plot:
+        rd_map_vdim_mean_dB = 20*np.log(rd_map_vdim_mean)
+        maximum = np.max(rd_map_vdim_mean_dB)
+        fig, (ax, ax1) = plt.subplots(1,2,figsize=[12,4],num="estimation_profiles")
+        ax.plot(rd_map_vdim_mean_dB-maximum)
+        ax.plot(20*np.log(cfar_threshold_rp)-maximum)
+        ax.plot(max_idx_rp,rd_map_vdim_mean_dB[max_idx_rp]-maximum,'x')
+        ax.set_xlim([0, rd_map_vdim_mean.shape[0]])
+        ax.set_xlabel("Range bins (1)")
+        ax.set_ylabel("Normalized power (dB)")
+        ax.legend(["profile", "cfar threshold"])
+        ax.grid()
+        ax.set_title("Range profile")
+        rd_v_slice_abs_dB = 20*np.log(rd_v_slice_abs)
+        maximum = np.max(rd_v_slice_abs_dB)
+        ax1.plot(rd_v_slice_abs_dB-maximum)
+        ax1.plot(20*np.log(cfar_threshold_vp)-maximum)
+        ax1.plot(peak_idx_vp,rd_v_slice_abs_dB[peak_idx_vp]-maximum,'x')
+        ax1.set_title("Doppler cross section")
+        ax1.set_xlabel("Doppler bins (1)")
+        ax1.set_ylabel("Normalized power (dB)")
+        ax1.set_xlim([0, rd_v_slice_abs.shape[0]])
+        ax1.legend(["profile", "cfar threshold"])
+        ax1.grid()
+        plt.savefig("estimation_profiles.pdf",
+            bbox_inches = 'tight'
+            )
+        plt.show()
+
+    return np.mean((angle_result-angle_result[:,0,None]),0)*180/np.pi
 
 
 def generate_pn(L_freqs_vec: np.array, L_dB_vec: np.array, N_s: int, T_s: float, tau):

@@ -632,6 +632,12 @@ class Radar(Thing, ABC):
 
         """
         win = self.win_doppler
+        win_coh_gain = np.sum(self.win_doppler) / self.N_f
+        if self.if_real:
+            scale_to_amp = 2 / (self.N_s * win_coh_gain)
+        else:
+            scale_to_amp = 1 / (self.N_s * win_coh_gain)
+
         if self.rp is None:
             raise TypeError("rp is None. It has to be calculated first")
         else:
@@ -640,6 +646,7 @@ class Radar(Thing, ABC):
                 win = win[np.newaxis, np.newaxis, :, np.newaxis]
                 z = 2 ** nextpow2(zp_fact * self.N_s)
                 self.rd = np.fft.fftshift(np.fft.fft(self.rp*win, n=z, axis=2), axes=2)
+                self.rd = self.rd*scale_to_amp
                 if process_noisy:
                     if self.rp_noisy is None:
                         raise TypeError(
@@ -648,6 +655,7 @@ class Radar(Thing, ABC):
                     self.rd_noisy = np.fft.fftshift(
                         np.fft.fft(self.rp_noisy*win, n=z, axis=2), axes=2
                     )
+                    self.rd_noisy = self.rd_noisy*scale_to_amp
             else:
                 self.rd = self.rp
 

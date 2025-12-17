@@ -5,7 +5,9 @@ from scipy.ndimage import maximum_filter
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
+import matplotlib.colors as mcolors
 from skradar.detection import cfar
+import h5py
 
 # plt.rcParams['text.latex.preamble']=r"\usepackage{lmodern}"
 # params = {'text.usetex' : True,
@@ -18,6 +20,52 @@ from scipy.constants import speed_of_light as c0
 
 FIGURE_WIDTH = 5.3
 
+def loadFileData(RADAR_FILENAME_HDF5:str):
+    
+    with h5py.File(RADAR_FILENAME_HDF5, "r") as f:
+        f0 = f.attrs["fStrt"][0]  # start freqeuncy
+        f1 = f.attrs["fStop"][0]  # stop freqeuncy
+        fs_f = f.attrs["fs"][0]  # fast-time sampling rate
+        N_f = int(f.attrs["Cfg_N"][0])  # number of fast-time samples
+        N_s = int(f.attrs["Cfg_Np"][0])  # number of slow-time samples
+        T_sw = f.attrs["Cfg_TRampUp"][0]
+        TRampTot = (
+            f.attrs["Cfg_Tp0"]
+            + f.attrs["Cfg_TRampUp"][0]
+            + f.attrs["Cfg_Tp1"]
+            + f.attrs["Cfg_TRampDo"]
+            + f.attrs["Cfg_Tp2"]
+        )
+        Tframe_min = TRampTot * N_s
+        NrChn = int(f.attrs["NrChn"][0])
+
+        data = np.empty([NrChn, N_s, N_f])
+
+        print(f"Loaded measurement with {int(f["Chn1"].shape[0]/N_s)} frames")
+        print(f"N_f = {N_f}, N_s = {N_s}")
+        # get slow slow and fast time data for every channel of specified frame
+        all_data = np.empty([int(f["Chn1"].shape[0]/N_s),NrChn, N_s, N_f])
+        for Na in range(1,NrChn+1):
+            ch_data = f['Chn%d'%Na]
+            ch_data_reshaped = np.reshape(ch_data, (-1,ch_data.chunks[0],ch_data.chunks[1]))
+            all_data[:,Na-1,:,:] = ch_data_reshaped
+
+        
+        # signal parameters
+        B_sw = f1 - f0  # chirp bandwidth
+        k = B_sw / T_sw
+        B_samp = k * (N_f - 1) / fs_f  # signal bandwidth while sampling
+        fc = f0 + B_sw / 2  # center frequency
+        lbd = c0 / fc
+        Ts_s = TRampTot  # slow-time sampling interval
+
+        measurement_parameters = {
+            'B' : B_samp,
+            'fc': fc,
+            'Ts_s' : Ts_s,
+        }
+
+    return all_data, measurement_parameters
 
 def os_cfar_2d(rd_map, guard_cells, training_cells, rank, threshold_factor):
     """
@@ -104,10 +152,20 @@ def detect_target_and_spurs(rd_map, debug_plot:bool=False):
     rd_v_slice = rd_map[:,:,max_idx_rp]
 
     rd_v_slice_abs = np.mean(np.abs(rd_v_slice),axis=0)
+
+    offset_guard = 5
+    nr_of_doppler_cells = rd_v_slice_abs.shape[0]
+    shift_mask = np.full_like(rd_v_slice_abs,fill_value=False)
+    shift_mask[:offset_guard+1] = True
+    shift_mask[-offset_guard:] = True
+    shift_mask[nr_of_doppler_cells//4-offset_guard:nr_of_doppler_cells//4+offset_guard] = True
+    shift_mask[3*nr_of_doppler_cells//4-offset_guard:3*nr_of_doppler_cells//4+offset_guard] = True
+    shift_mask[nr_of_doppler_cells//2-offset_guard:nr_of_doppler_cells//2+offset_guard] = True
+
     cfarConfig_st = cfar.CFARConfig(train_cells=25, guard_cells=10,
-                                               pfa=1e-4, mode=cfar.CFARMode.CA)
+                                               pfa=1e-2, mode=cfar.CFARMode.CA) # -6
     cfar_threshold_vp = cfar.cfar_threshold(rd_v_slice_abs,cfarConfig_st)
-    mask = rd_v_slice_abs>cfar_threshold_vp
+    mask = np.logical_and((rd_v_slice_abs>cfar_threshold_vp), shift_mask)
     idx_array = np.arange(rd_v_slice_abs.shape[0])[mask]
     peak_idx_vp = idx_array[sp.signal.find_peaks(rd_v_slice_abs[mask])[0]]
     
@@ -122,11 +180,12 @@ def detect_target_and_spurs(rd_map, debug_plot:bool=False):
     print(np.mean((angle_result-angle_result[:,0,None]),0)*180/np.pi)
 
     if debug_plot:
-        rd_map_vdim_mean_dB = 20*np.log(rd_map_vdim_mean)
+        rd_map_vdim_mean_dB = 20*np.log10(rd_map_vdim_mean)
+        np.save('rd_map_vdim_mean_dB', rd_map_vdim_mean_dB)
         maximum = np.max(rd_map_vdim_mean_dB)
         fig, (ax, ax1) = plt.subplots(1,2,figsize=[12,4],num="estimation_profiles")
         ax.plot(rd_map_vdim_mean_dB-maximum)
-        ax.plot(20*np.log(cfar_threshold_rp)-maximum)
+        ax.plot(20*np.log10(cfar_threshold_rp)-maximum)
         ax.plot(max_idx_rp,rd_map_vdim_mean_dB[max_idx_rp]-maximum,'x')
         ax.set_xlim([0, rd_map_vdim_mean.shape[0]])
         ax.set_xlabel("Range bins (1)")
@@ -134,10 +193,11 @@ def detect_target_and_spurs(rd_map, debug_plot:bool=False):
         ax.legend(["profile", "cfar threshold"])
         ax.grid()
         ax.set_title("Range profile")
-        rd_v_slice_abs_dB = 20*np.log(rd_v_slice_abs)
+        rd_v_slice_abs_dB = 20*np.log10(rd_v_slice_abs)
+        np.save('rd_v_slice_abs_dB', rd_v_slice_abs_dB)
         maximum = np.max(rd_v_slice_abs_dB)
         ax1.plot(rd_v_slice_abs_dB-maximum)
-        ax1.plot(20*np.log(cfar_threshold_vp)-maximum)
+        ax1.plot(20*np.log10(cfar_threshold_vp)-maximum)
         ax1.plot(peak_idx_vp,rd_v_slice_abs_dB[peak_idx_vp]-maximum,'x')
         ax1.set_title("Doppler cross section")
         ax1.set_xlabel("Doppler bins (1)")
@@ -150,8 +210,26 @@ def detect_target_and_spurs(rd_map, debug_plot:bool=False):
             )
         plt.show()
 
+    # return np.mean((angle_result-np.mean(angle_result,axis=1,keepdims=True)),0)*180/np.pi
     return np.mean((angle_result-angle_result[:,0,None]),0)*180/np.pi
 
+def compare_profiles():
+    rd_v_slice_abs_dB_tx1_first_iteration_1 = np.load('rd_v_slice_abs_dB_tx0_first_iteration.npy')
+    rd_v_slice_abs_dB_tx1_88dB_1 = np.load('rd_v_slice_abs_dB_tx0_95dB_1.npy')
+    maximum = np.max(rd_v_slice_abs_dB_tx1_first_iteration_1)
+    fig, ax = plt.subplots(1,1,figsize=[8,4],num="estimation_profiles")
+    ax.plot(rd_v_slice_abs_dB_tx1_first_iteration_1-maximum)
+    ax.plot(rd_v_slice_abs_dB_tx1_88dB_1-maximum)
+    ax.set_xlim([0, rd_v_slice_abs_dB_tx1_first_iteration_1.shape[0]])
+    ax.set_xlabel("Range bins (1)")
+    ax.set_ylabel("Normalized power (dB)")
+    ax.legend(["no correction", "predistortion"])
+    ax.grid()
+    ax.set_title("Range profile")
+    plt.savefig("profile_comparison.pdf",
+        bbox_inches = 'tight'
+        )
+    plt.show()
 
 def generate_pn(L_freqs_vec: np.array, L_dB_vec: np.array, N_s: int, T_s: float, tau):
 
@@ -259,14 +337,14 @@ def RD_processing(
     num_chirps = timeDomain.shape[1]
     num_samples = timeDomain.shape[2]
 
-    range_window_pre_normalization = scipy.signal.windows.hann(num_samples, sym=False)
+    range_window_pre_normalization = sp.signal.windows.hann(num_samples, sym=False)
     range_window = (
         range_window_pre_normalization
         / np.sum(range_window_pre_normalization)
         # range_window_pre_normalization / (np.sum(range_window_pre_normalization) / num_samples)
     )
 
-    dop_window_pre_normalization = scipy.signal.windows.hann(num_chirps, sym=False)
+    dop_window_pre_normalization = sp.signal.windows.hann(num_chirps, sym=False)
     dop_window = (
         dop_window_pre_normalization
         / np.sum(dop_window_pre_normalization)
@@ -614,3 +692,51 @@ def plot_three_RD_maps(
         RD_figure_ax[i].set_xlabel("Range in m")
 
     return RD_figure, RD_figure_ax
+
+def plotMaps(data,titles:str=None, cbarLabel=None,x_axis=None,y_axis=None):
+
+    nr_of_maps = data.shape[0]
+    arrange_x = int(np.ceil(np.sqrt(nr_of_maps)))
+    arrange_y = int(np.ceil(nr_of_maps/arrange_x))
+
+
+    # Common normalization across all subplots
+    vmin = np.nanmin(data)
+    vmax = np.nanmax(data)
+    
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    cmap = 'viridis'  # choose your preferred colormap
+
+    if x_axis == None:
+        x_axis={'min_value': 0, 'max_value' : data.shape[-2], 'label' : 'Idx (1)'}
+    if y_axis == None:
+        y_axis={'min_value': 0, 'max_value' : data.shape[-1], 'label' : 'Idx (1)'}
+
+    fig_rd, ax_rd = plt.subplots(arrange_y, arrange_x, constrained_layout=True,figsize=[2*FIGURE_WIDTH, 2*FIGURE_WIDTH *0.8*arrange_y/arrange_x])
+    ax_rd = ax_rd.flatten()
+    for i in range(ax_rd.shape[0]):
+        if i >= nr_of_maps:
+            fig_rd.delaxes(ax_rd[i])
+        else:
+            im00 = ax_rd[i].imshow(data[i].T, aspect='auto', cmap=cmap, norm=norm,origin="lower",
+                                   extent=[x_axis['min_value'],x_axis['max_value'],y_axis['min_value'],y_axis['max_value']])
+            ax_rd[i].set_xlim([x_axis['min_value'], x_axis['max_value']])
+            ax_rd[i].set_ylim([y_axis['min_value'], y_axis['max_value']])
+            ax_rd[i].set_xlabel(x_axis['label'])
+            ax_rd[i].set_ylabel(y_axis['label'])
+            if titles != None: 
+                ax_rd[i].set_title(titles[i])
+
+    if arrange_y >= arrange_x:
+        cbar = fig_rd.colorbar(im00, ax=ax_rd, location='right',aspect = 30)
+    else:
+        cbar = fig_rd.colorbar(im00, ax=ax_rd, location='bottom',aspect = 30)
+
+    if cbarLabel != None:
+        cbar.set_label(cbarLabel)
+
+    plt.savefig("maps.pdf",
+            bbox_inches = 'tight'
+            )
+
+    plt.show()

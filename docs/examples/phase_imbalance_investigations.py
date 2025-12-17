@@ -16,7 +16,7 @@ import h5py
 import time
 import scipy
 
-from utility_functions import detect_target_and_spurs
+from utility_functions import detect_target_and_spurs, get_info, plot_RD_maps
 
 from matplotlib import rcParams
 plt.rcParams['text.latex.preamble']=r"\usepackage{lmodern}"
@@ -28,7 +28,7 @@ plt.rcParams.update(params)
 
 plt.ioff()
 np.random.seed(1)
-
+#compare_profiles()
 # reordered by ipaddr, testing chirp mod
 RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\testing\ip12_tx1_000_1.h5"
 
@@ -38,8 +38,40 @@ RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\mea
 
 # measurements 27.11 single transmit 90 degree steps
 RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\ip11_tx1_90deg_corr_1.h5"
-RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx1_calib_100dB.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx1_88dB_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx1_first_iteration_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx2_84dB.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx2_first_iteration.h5"
 
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx0_95dB_1.h5"
+#RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx0_first_iteration.h5"
+
+# prog_file = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx1_const_progress.npy"
+# prog_file = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx0_const_progress.npy"
+# prog_file = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_imbalance\tx2_const_progress.npy"
+# phase_progression = np.load(prog_file)
+# phase_progression[:,1]=phase_progression[:,1]-90
+# phase_progression[:,2]=phase_progression[:,2]-180
+# phase_progression[:,3]=phase_progression[:,3]-270
+# fig,ax = plt.subplots(1,1,num="estimated_error")
+# ax.plot(-(phase_progression-phase_progression[:,0][:,None]))
+# ax.set_xlabel("Iteration idx")
+# ax.set_ylabel("Applied correction offset (°)")
+# ax.legend(["0 deg","90 deg","180 deg","270 deg"])
+# ax.set_xlim([0,10])
+# ax.grid()
+# plt.show()
+
+# test bistatic pole
+# RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\setup_demo\qpsk_tx0_pole4mp_driving_wood20251203_08-10-30_1.h5" # unf only one sensor activated
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\setup_demo\TDM_tx0_poleRight20251210_09-32-51_1.h5"
+
+# RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_step_investigation\new_TDM_rx_ip11.h5"
+# RADAR_FILENAME_HDF5_2 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_step_investigation\new_TDM_rx_ip12.h5"
+
+# newer iterations
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_step_investigation\test_1.h5"
+RADAR_FILENAME_HDF5_1 = r"C:\Users\Preining\Documents\CD_Lab\antenna_chamber\measurement_data\phase_step_investigation\test_firstIt_1.h5"
 
 
 evaluate_measurement = True
@@ -48,7 +80,7 @@ min_target_range = 1 # omit detection of leakage peak
 nr_of_targets = 1 # number of peak positions to detect
 range_zoom = 2#5
 axis_frequency = False  # show IF frequency on range profile
-calib_target_dist = 3.2 # 2.93 #  5.3 # used also for simulation
+calib_target_dist = 4 # 2.93 #  5.3 # used also for simulation
 calib_range_peak_tolerance = 2 # 0.5 # in m, depends on target position accuracy and expected frequency offsets
 second_target_dist = 20
 
@@ -158,7 +190,7 @@ radar_simulated = skradar.FMCWRadar(
     rx_ant_gains=np.array([10,10]),
     pos=radar_pos,
     name="simulated radar",
-    if_real=False,
+    if_real=True,
     coherent_pn=True,    # for comparsion with measurement where no phase noise is added in simulation
     chirp_modulation = "bpsk",
 )
@@ -195,8 +227,9 @@ scene = skradar.Scene([radar_simulated, radar_measured], [calib_target])
 radar_simulated.sim_chirps()
 
 # define imbalance vector
-imbalance_error_vector = np.array([0.0, 7.0, 16.0, 7.0])
+imbalance_error_vector = np.array([0.0, 7.0, 16.0, -8.0])
 remaining_imbalance_error_vector = np.copy(imbalance_error_vector)
+remaining_imbalance_error_vector_all = np.copy(remaining_imbalance_error_vector)
 
 # assign to simulated signal
 radar_simulated.s_if_noisy[0,:,0::4,:] = radar_simulated.s_if_noisy[0,:,0::4,:]*np.exp(1j*np.pi*remaining_imbalance_error_vector[0]/180)
@@ -214,10 +247,12 @@ radar_measured.doppler_processing(zp_fact=zp_fact_doppler)
 
 # estimate phase error
 estimated_angle_error = detect_target_and_spurs(radar_simulated.rd_noisy[0], True)
+estimated_angle_error_progression = np.zeros_like(estimated_angle_error)
+estimated_angle_error_progression = np.vstack((estimated_angle_error_progression,estimated_angle_error))
 detect_target_and_spurs(radar_measured.rd[0], True)
 
 # correct error in simulated signal
-nr_of_iterations = 0
+nr_of_iterations = 10
 for iteration_idx in range(nr_of_iterations):
 
     if estimated_angle_error.shape[0]==4:
@@ -229,6 +264,7 @@ for iteration_idx in range(nr_of_iterations):
         print(f"Estimated phase imbalance: {imbalance_error_vector-remaining_imbalance_error_vector}°")
         break
 
+    remaining_imbalance_error_vector_all = np.vstack((remaining_imbalance_error_vector_all,remaining_imbalance_error_vector))
     # create new measurement data
     radar_simulated.sim_chirps()
     radar_simulated.merge_mimo()
@@ -243,7 +279,33 @@ for iteration_idx in range(nr_of_iterations):
     radar_simulated.range_compression(zp_fact=zp_fact_range)
     radar_simulated.doppler_processing(zp_fact=zp_fact_doppler)
 
-    estimated_angle_error = detect_target_and_spurs(radar_simulated.rd_noisy[0], True)
+    if iteration_idx == 9:
+        estimated_angle_error = detect_target_and_spurs(radar_simulated.rd_noisy[0], True)
+    else:
+        estimated_angle_error = detect_target_and_spurs(radar_simulated.rd_noisy[0], False)
+
+fig,ax = plt.subplots(1,1,num="remaining_error")
+ax.plot(remaining_imbalance_error_vector_all)
+ax.set_xlabel("Iteration idx")
+ax.set_ylabel("Remaining error (°)")
+ax.legend(["0 deg","90 deg","180 deg","270 deg"])
+ax.set_xlim([0,remaining_imbalance_error_vector_all.shape[0]-1])
+ax.grid()
+plt.savefig("remaining_error.pdf",
+            bbox_inches = 'tight'
+            )
+
+fig,ax = plt.subplots(1,1,num="estimated_imbalance_error")
+ax.plot(remaining_imbalance_error_vector_all-imbalance_error_vector[None,:])
+ax.set_xlabel("Iteration idx")
+ax.set_ylabel("Applied correction offset (°)")
+ax.legend(["0 deg","90 deg","180 deg","270 deg"])
+ax.set_xlim([0,remaining_imbalance_error_vector_all.shape[0]-1])
+ax.grid()
+plt.savefig("estimated_imbalance_error.pdf",
+            bbox_inches = 'tight'
+            )
+plt.show()
 
 # sqrt(2) to convert to RMS power from sinusoidal peak value
 rp_simulated_noisy_scaled = 1 / (np.sqrt(2)) * radar_simulated.rp_noisy
@@ -396,14 +458,14 @@ plt.show()
 
 rd_fig, (rd_sim_ax, rd_meas_ax) = plt.subplots(1,2,figsize=[10,4],num="rd_maps")
 rd_sim_ax.imshow(
-    20 * np.log(np.abs(radar_simulated.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])).T,
+    20 * np.log10(np.abs(radar_simulated.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])).T,
     aspect="auto",origin="lower",extent=[-v_max,v_max,0,x_axis_plot[-1]]
 )
 rd_sim_ax.set_xlabel("v in m/s")
 rd_sim_ax.set_ylabel("range in m")
 rd_sim_ax.set_title("Simulation")
 rd_meas_ax.imshow(
-    20 * np.log(np.abs(radar_measured.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])).T,
+    20 * np.log10(np.abs(radar_measured.rd_noisy[0, 0, :, : N_f * zp_fact_range // 2])).T,
     aspect="auto",origin="lower",extent=[-v_max,v_max,0,x_axis_plot[-1]]
 )
 rd_meas_ax.set_xlabel("v in m/s")

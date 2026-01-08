@@ -740,3 +740,98 @@ def plotMaps(data,titles:str=None, cbarLabel=None,x_axis=None,y_axis=None):
             )
 
     plt.show()
+
+def plotProfiles(x_axis_values, data, titles:str=None,x_axis=None,y_axis=None):
+
+    nr_of_maps = data.shape[0]
+    arrange_x = int(np.ceil(np.sqrt(nr_of_maps)))
+    arrange_y = int(np.ceil(nr_of_maps/arrange_x))
+
+    data_max = np.nanmax(data[:,0])
+    data_min = np.nanmin(data[:,0])
+
+    if x_axis == None:
+        x_axis={'min_value': 0, 'max_value' : data.shape[-1], 'label' : 'Idx (1)'}
+    if y_axis == None:
+        y_axis={'min_value': data_min, 'max_value' : data_max, 'label' : 'Idx (1)'}
+
+    fig_rp, ax_rp = plt.subplots(arrange_y, arrange_x, constrained_layout=True,figsize=[2*FIGURE_WIDTH, 2*FIGURE_WIDTH *0.8*arrange_y/arrange_x])
+    
+    single_map = False
+    try:
+        ax_rp = ax_rp.flatten()
+    except:
+        single_map = True
+        pass
+    
+    if not single_map:
+        for i in range(ax_rp.shape[0]):
+            if i >= nr_of_maps:
+                fig_rp.delaxes(ax_rp[i])
+            else:
+                profile00 = ax_rp[i].plot(x_axis_values,data[i].T)
+
+                ax_rp[i].set_xlim([x_axis['min_value'], x_axis['max_value']])
+                ax_rp[i].set_ylim([y_axis['min_value'], y_axis['max_value']])
+                ax_rp[i].set_xlabel(x_axis['label'])
+                ax_rp[i].set_ylabel(y_axis['label'])
+                ax_rp[i].grid()
+                if titles != None: 
+                    ax_rp[i].set_title(titles[i])
+    else:
+        profile00 = ax_rp.plot(x_axis_values,data[0].T)
+
+        ax_rp.set_xlim([x_axis['min_value'], x_axis['max_value']])
+        ax_rp.set_ylim([y_axis['min_value'], y_axis['max_value']])
+        ax_rp.set_xlabel(x_axis['label'])
+        ax_rp.set_ylabel(y_axis['label'])
+        ax_rp.grid()
+        if titles != None: 
+            ax_rp.set_title(titles[0])
+
+
+    plt.savefig("profiles.pdf",
+            bbox_inches = 'tight'
+            )
+
+    plt.show()
+
+def findPeaksInIntervals(data,mask):
+    
+    indices = np.arange(data.shape[1])
+    if mask.shape[0] == 1:
+        mask = np.repeat(mask,data.shape[0],axis=0)
+    
+    peak_indices = {}
+    for profile_idx in range(data.shape[0]):
+        observed_data = data[profile_idx,mask[profile_idx]]
+        masked_indices = indices[mask[profile_idx]]
+        peak_indices_unsorted = masked_indices[sp.signal.find_peaks(observed_data)[0]]
+        peak_indices[profile_idx] = peak_indices_unsorted[np.argsort(data[profile_idx,peak_indices_unsorted])][::-1]
+
+    return peak_indices
+
+def beamformer(antenna_samples):
+    N_a = antenna_samples.shape[0]   # number of array elements
+    N_fft = 128*2
+    d_origin = np.arange(0,N_a)/2 # euclidian distance of array elements from origin in wavelengths
+
+    incident_angle = np.linspace(-90,90,N_fft,endpoint=True)
+
+    steering_vector = np.exp(1j*2*np.pi*d_origin[::-1,None]*np.sin(np.pi*(incident_angle)/180)[None,:])
+
+    # win_st = sp.signal.windows.hamming(N_a)
+    win_st = sp.signal.windows.boxcar(N_a)
+
+    win_st_bf = win_st # np.append(win_st_0,win_st_0)
+    cov_mtx = (antenna_samples*win_st_bf)[:,None]*(np.conj(antenna_samples)*win_st_bf)[None,:]
+    # angle_profile = 1/np.diag(np.matmul(np.matmul(np.conj(steering_vector.T),np.linalg.inv(cov_mtx)),steering_vector)) # capon bf
+    angle_profile = np.diag(np.matmul(np.matmul(np.conj(steering_vector.T),cov_mtx),steering_vector)) # /np.diag(np.matmul(steering_vector.T,np.conj(steering_vector)))
+
+    return 10*np.log10(np.abs(angle_profile)), incident_angle
+
+def generate_calibration_data(N1_0deg_data_path, N2_0deg_data_path):
+    N1_0deg_data = np.load(N1_0deg_data_path)
+    N2_0deg_data = np.load(N2_0deg_data_path)
+
+    return np.vstack((N1_0deg_data[:2],N2_0deg_data[2:]))
